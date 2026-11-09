@@ -51,11 +51,13 @@ def _resolve_job(context) -> Job:
             return context.data.job_for_row(int(ud["row"]))
         except (LookupError, ValueError):
             raise SetupError(f"There is no job on row {ud['row']} of the Jobs sheet.\n\n{_jobs_overview(context)}")
-    pending = [j for j in context.data.jobs if j.status.lower() == "pending"]
-    if pending:
-        return pending[0]
+    # Pending jobs first, then Failed ones (so a run that failed is retried by a plain `behave`).
+    for wanted in ("pending", "failed"):
+        jobs = [j for j in context.data.jobs if j.status.lower() == wanted]
+        if jobs:
+            return jobs[0]
     raise SetupError(
-        "No job to run: there is no row with Status = Pending in the Jobs sheet.\n\n"
+        "No job to run: there is no row with Status = Pending or Failed in the Jobs sheet.\n\n"
         f"{_jobs_overview(context)}\n\n"
         "Do one of these:\n"
         "  - add the job URL to the Jobs sheet with Status = Pending, then run:  behave\n"

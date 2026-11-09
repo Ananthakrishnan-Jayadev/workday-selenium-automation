@@ -44,12 +44,14 @@ def match_score(candidate: str, label: str) -> int:
     return 0
 
 
-def best_match(candidates: Iterable[str], labels: Sequence[str]) -> tuple[int, str] | None:
+def best_match(candidates: Iterable[str], labels: Sequence[str], min_score: int = 1) -> tuple[int, str] | None:
     """Try each candidate in order; return (index, label) of the best label for the first candidate
-    that matches anything. Exact beats starts-with beats contains."""
+    that matches anything. Exact (3) beats starts-with (2) beats contains (1).
+    min_score=2 ('exact' mode, used for question answers): never accept a mere 'contains' match,
+    so 'Man' can't pick 'Trans Man'; the next fallback is tried instead."""
     for candidate in candidates:
         scored = [(match_score(candidate, label), i) for i, label in enumerate(labels)]
-        scored = [s for s in scored if s[0] > 0]
+        scored = [s for s in scored if s[0] >= min_score]
         if scored:
             score, idx = max(scored, key=lambda s: (s[0], -s[1]))
             return idx, labels[idx]
@@ -69,12 +71,14 @@ _GENERIC = {"science", "sciences", "engineering", "technology", "technologies", 
             "administration", "systems", "program", "programming", "language", "degree", "certificate"}
 
 
-def key_words(text: str | None) -> list[str]:
-    """Distinctive whole words, longest first: 'Data Analytics' → ['analytics', 'data'],
-    'Data Science' → ['data']. Generic words are kept only if there is nothing else."""
+def key_words(text: str | None, in_order: bool = False) -> list[str]:
+    """Distinctive whole words: 'Data Analytics' → ['analytics', 'data'] (longest first), or with
+    in_order=True → ['data', 'analytics'] (as written; the first word is usually the field: "Data
+    Analytics" should find a "Data ..." option before a "Medical Analytics" one).
+    Generic words are kept only if there is nothing else."""
     words = [w for w in re.findall(r"[a-z0-9+#]+", normalize(text)) if w not in _STOPWORDS and len(w) >= 2]
-    distinctive = [w for w in words if w not in _GENERIC] or words
-    return sorted(dict.fromkeys(distinctive), key=len, reverse=True)
+    distinctive = list(dict.fromkeys([w for w in words if w not in _GENERIC] or words))
+    return distinctive if in_order else sorted(distinctive, key=len, reverse=True)
 
 
 def word_overlap(candidate: str, label: str) -> float:

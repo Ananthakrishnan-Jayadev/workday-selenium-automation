@@ -45,31 +45,47 @@ set `CIBC_PASSWORD=...`, and put `ENV:CIBC_PASSWORD` in the Password cell.
 | Certifications | certificate | only used if the tenant has the section (CIBC doesn't) |
 | Questions | rule | keywords in the question → answer (see below), incl. the terms checkbox |
 
-**Writing values**
-- `A; B; C`: fallbacks, tried in order. The first one Workday has wins, and a later run replaces a
-  fallback with your first choice if it becomes available.
-- `Category > Value`: nested lists, e.g. `Job Board/Social Media > LinkedIn`.
-- Matching ignores case, apostrophes, dashes and slashes. A value matches an option that equals it,
-  starts with it (`Canada` → `Canada (+1)`), or contains it as whole words (`Fluent` → `5 - Fluent`,
-  but `Male` never matches `Female`).
-- **Field of Study** also takes the closest option by whole words before using a fallback
-  (`Artificial Intelligence` → `Artificial Intelligence and Robotics`). Generic words such as
-  *science* or *engineering* don't count on their own.
-- **Skills** are strict: `SQL` does not accept `SQL Assistant`. A skill Workday doesn't list exactly is
-  skipped with a warning; the log shows what Workday offered.
+**Fallbacks get their own columns** (tried left to right; the first one the company's form offers wins):
+| Sheet | Columns |
+|---|---|
+| Profile | `Value`, `Fallback 1`, `Fallback 2` (e.g. PhoneType: `Mobile` · `Personal Primary`) |
+| Skills | `Skill`, `Fallback 1`, `Fallback 2` (e.g. `SQL` · `PostgreSQL` · `MySQL`) |
+| Questions | `Answer`, `Fallback 1`, `Fallback 2`, `Fallback 3` (e.g. `Man` · `Male`) |
+| Education | `Degree`, `Degree Fallback 1..3`, `FieldOfStudy`, `FieldOfStudy Fallback 1..3` |
+| Languages | `Proficiency`, `Proficiency Fallback 1..2` |
 
-**Questions sheet**: `Keywords | Answer | Company | Page | Notes`
+A later run replaces a fallback with your first choice if that becomes available. (A `;` inside one cell
+still works as a separator, but columns are easier to read.)
+
+**Matching**
+- Case, apostrophes, dashes and slashes are ignored. `Category > Value` picks from nested lists
+  (`Job Board/Social Media > LinkedIn`).
+- Profile / My Experience values match an option that equals them, starts with them
+  (`Canada` → `Canada (+1)`) or contains them as whole words (`Fluent` → `5 - Fluent`).
+- **Question answers are strict**: the option must equal the answer or start with it
+  (`Yes` → `Yes - Newcomer`). `Man` never picks `Trans Man`; add the company's wording as a fallback.
+- **Field of Study** takes the closest option by whole words before a fallback, searching your words in
+  order (`Artificial Intelligence` → `Artificial Intelligence and Robotics`; `Data Analytics` looks for
+  a `Data …` option first). Generic words such as *science* don't count on their own.
+- **Skills** need Workday's exact name (a bracketed note is fine). One Workday doesn't list is skipped.
+
+**Questions sheet**: `Keywords | Answer | Fallback 1-3 | Company | Page | Notes`
 - `authorized to work; eligible to work`: any of these phrases. `relative; family member + td`:
   (relative OR family member) AND td. Phrases match whole words.
-- Top-to-bottom, first match wins; a row with a Company beats a blank-Company row for that company.
-- Leave Answer blank to be asked: a required question with no answer pauses the run and lists the
-  options its dropdown offers. For checkbox groups, list the labels to tick separated by `;`.
+- `{company}` stands for the job's company: `worked for {company}` matches "worked for BMO Financial
+  Group" on a BMO job and "worked for CIBC" on a CIBC job.
+- Which row wins: the question's **first clause** (up to `?`, `(` or `.`) is matched first, and the
+  phrase ending nearest the end of that clause wins. So "What is your gender? … gender identity in the
+  next question" uses the gender row, and "What is your gender identity?" uses the identity row. A row
+  with a Company beats a general row for that company.
+- Blank Answer = ask me: a required question with no answer pauses the run and lists its options.
+  For checkbox groups, `Yes` ticks every box; or list the labels to tick.
 
 The `data/` folder is git-ignored: it contains your password and personal details.
 
 ## Run
 ```bash
-behave                                   # first Pending job in the Jobs sheet
+behave                                   # first Pending job, else the first Failed one (retry)
 behave -D url="https://<company>.wd3.myworkdayjobs.com/.../job/..."
 behave -D row=2                          # a specific Jobs sheet row
 

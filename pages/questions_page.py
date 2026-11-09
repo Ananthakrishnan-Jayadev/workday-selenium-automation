@@ -62,7 +62,9 @@ class QuestionsPage(BasePage):
 
             self.act.close_popups()
             try:
-                result = self.w.fill_auto(css, rule.answer, desc=f"Q: {short[:60]}")
+                # exact: an option must equal the answer or start with it; otherwise the next
+                # fallback column is tried ('Man' must not pick 'Trans Man')
+                result = self.w.fill_auto(css, rule.answers, desc=f"Q: {short[:60]}", exact=True)
             except Exception as exc:  # noqa: BLE001 - one question never stops the page
                 self.log.warning("Q: %s failed: %s", short, exc)
                 result = None
@@ -70,7 +72,8 @@ class QuestionsPage(BasePage):
                 self.log.info("Q: %s → %r (Questions row %s)", short, result, rule.row)
                 r.filled.append(short)
             else:
-                r.failed.append(f"{short} (answer {rule.answer!r} from Questions row {rule.row} not accepted)")
+                r.failed.append(f"{short} (none of {rule.answers} from Questions row {rule.row} is an option;"
+                                f" add the right one as a fallback)")
 
         self.act.close_popups()
         self.log.info(r.summary())

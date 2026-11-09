@@ -291,7 +291,7 @@ class MyExperiencePage(BasePage):
         self.fill_certifications(r, data)
         self.fill_languages(r, data.languages)
         self.fill_skills(r, data.skills)
-        self.fill_websites(r, split_list(p.get("Website")))
+        self.fill_websites(r, p.options("Website"))  # every URL in Value / Fallback columns
         if p.get("LinkedIn") and waits.is_present(self.driver, L.LINKEDIN):
             self._do(r, "LinkedIn", p.get("LinkedIn"),
                      lambda: self.act.type(L.LINKEDIN, p.get("LinkedIn"), desc="LinkedIn"))

@@ -256,7 +256,20 @@ found, the job is marked `Failed: no account` (V1 does not create accounts).
 ### `Certifications` (optional)
 | Name | Number | ExpiryMonth | ExpiryYear |
 
-### `Questions` (rule table, top-to-bottom, first match wins)
+### Fallback columns (all sheets)
+Fallbacks have their own columns, tried left to right: Profile `Value, Fallback 1, Fallback 2`;
+Skills `Skill, Fallback 1, Fallback 2`; Questions `Answer, Fallback 1..3`; Education
+`Degree / FieldOfStudy` + `<Base> Fallback N`; Languages `Proficiency` + `Proficiency Fallback N`
+(`excel_reader._with_fallbacks`). A `;` inside a cell still separates values.
+
+### `Questions` (rule table)
+Rule choice (`core/answers.find_rule`): match the question's first clause (text before `?`, `(`, `.`
+or `:`); among matches, company-specific first, then the phrase ending latest in that clause, then the
+longer phrase, then sheet order. If nothing matches the first clause, the whole text is used (sheet
+order). `{company}` in Keywords is replaced by the job's company. Answers are applied in **exact**
+mode (equal or starts-with only), so each company's wording goes in the fallback columns.
+
+Original column notes:
 | Keywords | Answer | Company | Page | Notes |
 |---|---|---|---|---|
 | `authorized to work;legally entitled;eligible to work` | Yes | | Application | |

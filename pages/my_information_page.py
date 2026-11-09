@@ -53,13 +53,17 @@ class MyInformationPage(BasePage):
         p = data.profile
         if not self.is_displayed(self.cfg.timeouts.page_change):
             raise AssertionError("My Information page is not displayed")
-        self.act.settle(0.5)  # the form renders in chunks right after the marker appears
+        # The page marker appears before the fields: wait for the form itself, or every field would be
+        # skipped as "not on this page" (BMO run 2026-11-09: 14 fields skipped).
+        if not waits.poll(lambda: any(self._present(x) for x in (L.FIRST_NAME, L.SOURCE_FIELD, L.COUNTRY_BUTTON)),
+                          self.cfg.timeouts.default):
+            self.log.warning("My Information: form fields did not appear within %ss", self.cfg.timeouts.default)
+        self.act.settle(0.8)
         r = FillReport(page=self.NAME)
 
-        # How did you hear about us
-        self._step(r, "How did you hear", L.SOURCE_INPUT, p.options("HowDidYouHear"),
-                   lambda: self.w.select_prompt(L.SOURCE_FIELD, L.SOURCE_INPUT, p.options("HowDidYouHear"),
-                                                desc="How did you hear"))
+        # How did you hear about us: a search field on CIBC, a dropdown on BMO, so let the widget decide
+        self._step(r, "How did you hear", L.SOURCE_FIELD, p.options("HowDidYouHear"),
+                   lambda: self.w.fill_auto(L.SOURCE_FIELD[1], p.options("HowDidYouHear"), desc="How did you hear"))
 
         # Have you worked with us before
         prev = p.as_bool("PreviouslyWorkedHere")
@@ -87,9 +91,9 @@ class MyInformationPage(BasePage):
         # Phone: type and code first, number last
         self._step(r, "Phone type", L.PHONE_TYPE_BUTTON, p.get("PhoneType"),
                    lambda: self.w.select_dropdown(L.PHONE_TYPE_BUTTON, p.options("PhoneType"), desc="Phone type"))
-        self._step(r, "Phone country code", L.PHONE_CODE_INPUT, p.get("PhoneCountryCode"),
-                   lambda: self.w.select_prompt(L.PHONE_CODE_FIELD, L.PHONE_CODE_INPUT,
-                                                p.options("PhoneCountryCode"), desc="Phone country code"))
+        self._step(r, "Phone country code", L.PHONE_CODE_FIELD, p.get("PhoneCountryCode"),
+                   lambda: self.w.fill_auto(L.PHONE_CODE_FIELD[1], p.options("PhoneCountryCode"),
+                                            desc="Phone country code"))
         self._text(r, "Phone number", L.PHONE_NUMBER, p.get("Phone"), compare="digits")
         self._text(r, "Phone extension", L.PHONE_EXTENSION, p.get("PhoneExtension"))
 

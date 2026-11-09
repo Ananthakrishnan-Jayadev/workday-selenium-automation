@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,26 @@ def _get(record: dict[str, str], *names: str) -> str:
     return ""
 
 
+def _with_fallbacks(record: dict[str, str], base: str, plain: bool = False) -> list[str]:
+    """The `base` column followed by its fallback columns, in order, as one list.
+
+    Fallback columns are named "<Base> Fallback 1", "<Base> Fallback 2", ... (Education, Languages)
+    or just "Fallback 1", "Fallback 2", ... when plain=True (Profile, Skills, Questions).
+    A ';' inside any cell also separates values, so older workbooks keep working."""
+    values = split_list(_get(record, base))
+    keys = {k.lower().replace(" ", ""): v for k, v in record.items()}
+    prefix = "fallback" if plain else f"{base.lower().replace(' ', '')}fallback"
+    numbered = sorted((int(m.group(1)), v) for k, v in keys.items()
+                      if (m := re.fullmatch(rf"{re.escape(prefix)}(\d+)", k)) and v)
+    for _n, v in numbered:
+        values += split_list(v)
+    return list(dict.fromkeys(values))
+
+
+def _is_fallback_column(header: str) -> bool:
+    return "fallback" in header.lower().replace(" ", "")
+
+
 def _resolve_secret(value: str) -> tuple[str, str]:
     """'ENV:NAME' → (value of NAME from the environment / .env, 'env NAME'). Missing → ''.
     The sign-in step reports a missing password; loading the workbook never fails because of one."""
@@ -96,7 +117,7 @@ def load_app_data(path: Path) -> AppData:
             for _row, r in _rows(sheets["profile"]):
                 key = _get(r, "Field", "Key")
                 if key:
-                    values[key] = _get(r, "Value")
+                    values[key] = _with_fallbacks(r, "Value", plain=True)
             data.profile = Profile(values)
 
         if "workexperience" in sheets:
@@ -116,8 +137,8 @@ def load_app_data(path: Path) -> AppData:
                 if not _get(r, "School"):
                     continue
                 data.education.append(EducationEntry(
-                    school=_get(r, "School"), degree=split_list(_get(r, "Degree")),
-                    field_of_study=split_list(_get(r, "FieldOfStudy")), gpa=_get(r, "GPA"),
+                    school=_get(r, "School"), degree=_with_fallbacks(r, "Degree"),
+                    field_of_study=_with_fallbacks(r, "FieldOfStudy"), gpa=_get(r, "GPA"),
                     start_year=_get(r, "StartYear"), end_year=_get(r, "EndYear"),
                 ))
 
@@ -126,13 +147,14 @@ def load_app_data(path: Path) -> AppData:
                 if not _get(r, "Language"):
                     continue
                 per_type = {normalize(k): split_list(v) for k, v in r.items()
-                            if v and normalize(k) not in ("language", "proficiency")}
+                            if v and normalize(k) not in ("language", "proficiency") and not _is_fallback_column(k)}
                 data.languages.append(LanguageEntry(language=_get(r, "Language"),
-                                                    proficiency=split_list(_get(r, "Proficiency")),
+                                                    proficiency=_with_fallbacks(r, "Proficiency"),
                                                     per_type=per_type))
 
         if "skills" in sheets:
-            data.skills = [_get(r, "Skill") for _row, r in _rows(sheets["skills"]) if _get(r, "Skill")]
+            data.skills = ["; ".join(_with_fallbacks(r, "Skill", plain=True))
+                           for _row, r in _rows(sheets["skills"]) if _get(r, "Skill")]
 
         if "certifications" in sheets:
             for _row, r in _rows(sheets["certifications"]):
@@ -145,7 +167,7 @@ def load_app_data(path: Path) -> AppData:
             for row, r in _rows(sheets["questions"]):
                 if _get(r, "Keywords"):
                     data.questions.append(QuestionRule(
-                        keywords=_get(r, "Keywords"), answer=_get(r, "Answer"),
+                        keywords=_get(r, "Keywords"), answer="; ".join(_with_fallbacks(r, "Answer", plain=True)),
                         company=_get(r, "Company"), page=_get(r, "Page"), row=row))
 
         return data

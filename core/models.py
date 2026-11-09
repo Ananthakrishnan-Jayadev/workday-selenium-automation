@@ -32,20 +32,22 @@ class Account:
 class Profile:
     """Key/value rows from the Profile sheet. Keys are case- and space-insensitive."""
 
-    def __init__(self, values: dict[str, str]):
-        self._values = {self._key(k): v for k, v in values.items()}
+    def __init__(self, values: dict[str, str | list[str]]):
+        # each key → [value, fallback 1, fallback 2, ...]
+        self._values = {self._key(k): split_list(v) for k, v in values.items()}
 
     @staticmethod
     def _key(k: str) -> str:
         return normalize(k).replace(" ", "")
 
     def get(self, key: str, default: str = "") -> str:
-        v = self._values.get(self._key(key))
-        return default if v is None or str(v).strip() == "" else str(v).strip()
+        """The main value (first column)."""
+        v = self._values.get(self._key(key)) or []
+        return v[0] if v else default
 
     def options(self, key: str) -> list[str]:
-        """Value split on ';': fallbacks tried in order."""
-        return split_list(self.get(key))
+        """The value and its fallbacks (Value, Fallback 1, Fallback 2, ...), tried in order."""
+        return list(self._values.get(self._key(key)) or [])
 
     def has(self, key: str) -> bool:
         return bool(self.get(key))

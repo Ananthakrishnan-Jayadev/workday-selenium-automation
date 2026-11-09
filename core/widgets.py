@@ -85,13 +85,17 @@ class Widgets:
         options = listbox.find_elements(*C.LISTBOX_OPTION)
         return options, [_label(o) for o in options]
 
-    def select_dropdown(self, button: Locator, candidates: str | Sequence[str], desc: str) -> str | None:
+    def select_dropdown(self, button: Locator, candidates: str | Sequence[str], desc: str,
+                        exact: bool = False) -> str | None:
+        """exact=True (question answers): an option must equal the value or start with it
+        ('Yes' → 'Yes - Newcomer'); 'Man' never picks 'Trans Man'. The next fallback is tried instead."""
         wanted = split_list(candidates)
         if not wanted:
             return None
+        min_score = 2 if exact else 1
 
         current = self.dropdown_value(button)
-        if any(match_score(w, current) >= 2 or contains_words(w, current) for w in wanted):
+        if any(match_score(w, current) >= 2 or (not exact and contains_words(w, current)) for w in wanted):
             self.log.info("%s: already %r", desc, current)  # e.g. 'Fluent' ~ '5 - Fluent'
             return current
 
@@ -112,9 +116,9 @@ class Widgets:
                 continue
 
             options, labels = self._listbox_options(listbox)
-            match = best_match(wanted, labels)
+            match = best_match(wanted, labels, min_score=min_score)
             if match is None:
-                match = self._listbox_type_ahead(wanted)
+                match = self._listbox_type_ahead(wanted, min_score)
                 if match is not None:
                     options, labels = match[2], [_label(o) for o in match[2]]
                     match = match[:2]
@@ -139,7 +143,7 @@ class Widgets:
         self.log.warning("%s: could not select any of %s", desc, wanted)
         return None
 
-    def _listbox_type_ahead(self, wanted: list[str]):
+    def _listbox_type_ahead(self, wanted: list[str], min_score: int = 1):
         """Long lists may not render every option. Type the value so the listbox jumps to it, then re-read."""
         for candidate in wanted:
             self.act.press(candidate)
@@ -148,7 +152,7 @@ class Widgets:
             if listbox is None:
                 return None
             options, labels = self._listbox_options(listbox)
-            m = best_match([candidate], labels)
+            m = best_match([candidate], labels, min_score=min_score)
             if m:
                 return m[0], m[1], options
         return None
@@ -345,7 +349,7 @@ class Widgets:
     def _search_by_words(self, field: Locator, input_: Locator, candidate: str, desc: str) -> str | None:
         """Search each key word of the candidate on its own (longest first) and take the option that
         shares the most whole words with the candidate (also when Workday auto-selects one)."""
-        for word in key_words(candidate):
+        for word in key_words(candidate, in_order=True):
             if len(word) < 3:
                 continue
             kind, auto = self._run_search(field, input_, word, desc)
@@ -605,11 +609,15 @@ class Widgets:
         """
         return self.driver.execute_script(js, field_css)
 
-    def fill_auto(self, field_css: str, value, desc: str, multi: bool = False, loose: bool = False):
+    def fill_auto(self, field_css: str, value, desc: str, multi: bool = False, loose: bool = False,
+                  exact: bool = False):
         """Fill a formField container with `value`, whatever kind of control it turns out to be.
         Returns something truthy on success, None/False on failure."""
         kind = self.detect(field_css)
         values = split_list(value) if not isinstance(value, bool) else []
+        # Text boxes get one value: a string as-is (it may legitimately contain ';'), or the first
+        # of a list of fallbacks.
+        text_value = value if isinstance(value, str) else (values[0] if values else "")
         loc = lambda sub="": (By.CSS_SELECTOR, f"{field_css} {sub}".strip())  # noqa: E731
         self.log.debug("%s: %s field", desc, kind)
         if kind == "missing":
@@ -617,11 +625,11 @@ class Widgets:
         if kind == "prompt":
             return self.select_prompt(loc(), loc("input"), values, desc=desc, multi=multi, loose=loose)
         if kind == "dropdown":
-            return self.select_dropdown(loc('button[aria-haspopup="listbox"]'), values, desc=desc)
+            return self.select_dropdown(loc('button[aria-haspopup="listbox"]'), values, desc=desc, exact=exact)
         if kind == "date":
             return self.fill_date(field_css, desc, year=values[0] if values else "")
         if kind == "textarea":
-            return self.act.type(loc("textarea"), str(value), desc=desc)
+            return self.act.type(loc("textarea"), text_value, desc=desc)
         if kind == "checkbox":
             boxes = self.driver.find_elements(By.CSS_SELECTOR, f'{field_css} input[type="checkbox"]')
             if len(boxes) > 1 and len(values) == 1 and normalize(values[0]) in ("yes", "true", "all"):
@@ -633,9 +641,9 @@ class Widgets:
             on = value if isinstance(value, bool) else normalize(values[0] if values else "") in ("yes", "true")
             return self.set_checkbox(loc('input[type="checkbox"]'), on, desc=desc)
         if kind == "radio":
-            return self.select_radio_by_label(field_css, values, desc=desc)
+            return self.select_radio_by_label(field_css, values, desc=desc, exact=exact)
         if kind == "text":
-            return self.act.type(loc("input"), str(value), desc=desc)
+            return self.act.type(loc("input"), text_value, desc=desc)
         self.log.warning("%s: don't know how to fill this field (%s)", desc, kind)
         return None
 
@@ -699,14 +707,15 @@ class Widgets:
         self.act.close_popups()
         return [l for l in labels if l and normalize(l) != "select one"]
 
-    def select_radio_by_label(self, field_css: str, candidates: Sequence[str], desc: str) -> str | None:
+    def select_radio_by_label(self, field_css: str, candidates: Sequence[str], desc: str,
+                              exact: bool = False) -> str | None:
         radios = self.driver.find_elements(By.CSS_SELECTOR, f'{field_css} input[type="radio"]')
         labels = []
         for r in radios:
             rid = r.get_attribute("id")
             lab = self.driver.find_elements(By.CSS_SELECTOR, f'label[for="{rid}"]') if rid else []
             labels.append((lab[0].text if lab else r.get_attribute("value") or "").strip())
-        match = best_match(candidates, labels)
+        match = best_match(candidates, labels, min_score=2 if exact else 1)
         if not match:
             self.log.warning("%s: none of %s in %s", desc, list(candidates), labels)
             return None
