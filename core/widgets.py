@@ -184,17 +184,31 @@ class Widgets:
                 labels.append(label)
         return opts, labels
 
-    def _wait_for_relevant_results(self, term: str, timeout: float, trust_no_match: bool) -> bool:
-        """Wait until the list shows an option matching `term` (exact, starts-with or contains).
+    def _selection_items(self, field: Locator) -> list[str]:
+        """Values currently selected in a prompt field (accessibility text + pills)."""
+        text = self.prompt_selection_text(field)
+        items = [i.strip() for i in text.split(",")[1:]] if "," in text else []
+        for p in self.selected_pills(field):
+            if p and p not in items:
+                items.append(p)
+        return items
 
-        Only a list that contains a match counts: Workday often shows an unrelated list first
-        ('No Items.', or the full A-Z list for Field of Study) and the real results later.
-        'No matches found' ends the wait only when trust_no_match is set (after Enter) and it has
-        stayed on screen for about a second: a stale one can linger from before the search."""
+    def _wait_for_outcome(self, field: Locator, before: set[str], term: str, timeout: float,
+                          trust_no_match: bool) -> tuple[str, str | None]:
+        """Wait for the result of a search. Checked on every poll, in this order:
+          1. the FIELD: did Workday select a value by itself? (Enter with a single match selects it
+             straight away and shows no list) → ('auto', that value)
+          2. the LIST: options containing a match for `term`, unchanged across two polls → ('list', None)
+          3. 'No matches found' on screen for ~2.5s (only if trust_no_match) → ('none', None)
+        Workday often shows an unrelated list first ('No Items.', the full A-Z list) and the real
+        results later, so only a list containing a match counts."""
         end = time.monotonic() + timeout
         time.sleep(0.4)
         last_trace, no_match_polls, seen_match = None, 0, None
         while time.monotonic() < end:
+            new = [i for i in self._selection_items(field) if i not in before]
+            if new:
+                return "auto", new[0]
             _, labels = self._result_options()
             no_match = self._no_matches()
             trace = (tuple(labels[:6]), no_match)
@@ -202,18 +216,53 @@ class Widgets:
                 self.log.debug("  search %r: %d options %s%s", term, len(labels), labels[:6],
                                " + 'No matches found'" if no_match else "")
                 last_trace = trace
-            match = best_match([term], labels) if labels else None
-            if match:
+            if labels and best_match([term], labels) is not None:
                 if seen_match == labels:  # same list on two polls in a row: settled
-                    return True
+                    return "list", None
                 seen_match = labels
             else:
                 seen_match = None
             no_match_polls = no_match_polls + 1 if (no_match and not labels) else 0
             if trust_no_match and no_match_polls >= 8:  # ~2.5s: it can flash up while the search runs
-                return False
+                return "none", None
             time.sleep(0.3)
-        return False
+        return "none", None
+
+    def _run_search(self, field: Locator, input_: Locator, term: str, desc: str) -> tuple[str, str | None]:
+        """Type `term`; press Enter only if typing alone didn't produce a result (on lists that filter
+        as you type, Enter can pick the highlighted option). Returns ('auto', value), ('list', None)
+        or ('none', None) as described in _wait_for_outcome."""
+        before = set(self._selection_items(field))
+        box = self.act.focus(input_, desc=f"{desc} input")
+        self.act.clear(box)
+        box.send_keys(term)
+        outcome = self._wait_for_outcome(field, before, term, 1.5, trust_no_match=False)
+        if outcome[0] == "none":
+            box.send_keys(Keys.ENTER)
+            outcome = self._wait_for_outcome(field, before, term, self.cfg.timeouts.prompt_results,
+                                             trust_no_match=True)
+        return outcome
+
+    def remove_selected(self, field: Locator, label: str) -> None:
+        """Remove one selected value (pill) from a prompt field."""
+        js = """
+        const [fieldEl, label] = arguments;
+        for (const item of fieldEl.querySelectorAll('[data-automation-id="selectedItem"]')) {
+            const opt = item.querySelector('[data-automation-id="promptOption"]');
+            const l = opt && (opt.getAttribute('data-automation-label') || opt.textContent).trim();
+            if (l === label) return item.querySelector('[data-automation-id="DELETE_charm"]');
+        }
+        return null;
+        """
+        try:
+            charm = self.driver.execute_script(js, self.driver.find_element(*field), label)
+        except WebDriverException:
+            charm = None
+        if charm:
+            self.act.click(charm, desc=f"remove {label!r}")
+            self.act.settle(0.3)
+        else:
+            self.log.debug("could not find a remove button for %r", label)
 
     def _click_prompt_option(self, option: WebElement, desc: str) -> None:
         checkbox = self.driver.execute_script(_JS_OPTION_CHECKBOX, option)
@@ -273,29 +322,29 @@ class Widgets:
 
     def _search_by_words(self, field: Locator, input_: Locator, candidate: str, desc: str) -> str | None:
         """Search each key word of the candidate on its own (longest first) and take the option that
-        shares the most whole words with the candidate."""
+        shares the most whole words with the candidate (also when Workday auto-selects one)."""
         for word in key_words(candidate):
             if len(word) < 3:
                 continue
-            box = self.act.focus(input_, desc=f"{desc} input")
-            self.act.clear(box)
-            box.send_keys(word)
-            found = self._wait_for_relevant_results(word, 1.5, trust_no_match=False)
-            if not found:
-                box.send_keys(Keys.ENTER)
-                found = self._wait_for_relevant_results(word, self.cfg.timeouts.prompt_results, trust_no_match=True)
+            kind, auto = self._run_search(field, input_, word, desc)
+            if kind == "auto":
+                if word_overlap(candidate, auto) > 0:
+                    self.log.info("%s: %r not listed; Workday selected %r for %r (close by words)",
+                                  desc, candidate, auto, word)
+                    return auto
+                self.log.info("%s: Workday selected %r for %r, not close to %r; removing it", desc, auto, word, candidate)
+                self.remove_selected(field, auto)
+                continue
             options, labels = self._result_options()
-            match = closest_by_words(candidate, labels) if found else None
+            match = closest_by_words(candidate, labels) if kind == "list" else None
             if match is None:
                 self.log.debug("%s: nothing close to %r when searching %r", desc, candidate, word)
-                self.act.clear(box)
                 continue
             idx, label = match
             self._click_prompt_option(options[idx], desc=f"{desc} option {label!r}")
             if waits.poll(lambda: self.prompt_has(field, [label]), self.cfg.timeouts.short):
                 self.log.info("%s: %r not listed; closest by words: %r (searched %r)", desc, candidate, label, word)
                 return label
-            self.act.clear(box)
         return None
 
     def _search_and_pick(self, field: Locator, input_: Locator, path: list[str], desc: str) -> str | None:
@@ -307,26 +356,26 @@ class Widgets:
             terms.append(plain)
 
         found = False
+        target = path[-1]
         for term in terms:
-            box = self.act.focus(input_, desc=f"{desc} input")
-            self.act.clear(box)
-            box.send_keys(term)
-            # Some lists filter as you type; others (skills, field of study, "how did you hear")
-            # only search on Enter. Enter is pressed only if typing alone didn't show a match,
-            # because on a filtered list Enter can pick the highlighted option.
-            found = self._wait_for_relevant_results(term, 1.5, trust_no_match=False)
-            if not found:
-                box.send_keys(Keys.ENTER)
-                found = self._wait_for_relevant_results(term, self.cfg.timeouts.prompt_results,
-                                                        trust_no_match=True)
-            if found:
+            kind, auto = self._run_search(field, input_, term, desc)
+            if kind == "auto":
+                # Enter with a single match: Workday selected it without showing a list.
+                if match_score(target, auto) >= 1 or match_score(term, auto) >= 1:
+                    self.log.info("%s: Workday selected %r for %r", desc, auto, term)
+                    return auto
+                self.log.info("%s: Workday selected %r for %r, which isn't what we want; removing it",
+                              desc, auto, term)
+                self.remove_selected(field, auto)
+                continue
+            if kind == "list":
+                found = True
                 break
             _, seen = self._result_options()
             self.log.info("%s: no option matching %r%s", desc, term,
                           " (No matches found)" if self._no_matches() else f". List showed: {seen[:15]}")
             if self.debug_capture:
                 self.debug_capture(f"prompt_no_match_{term}")
-            self.act.clear(box)
         if not found:
             return None
 
