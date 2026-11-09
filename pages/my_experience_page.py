@@ -109,7 +109,8 @@ class MyExperiencePage(BasePage):
         else:
             r.filled.append(label)
 
-    def _fill_in(self, r: FillReport, kind: str, i: int, label: str, aids: list[str], value, multi=False):
+    def _fill_in(self, r: FillReport, kind: str, i: int, label: str, aids: list[str], value, multi=False,
+                 loose=False):
         entry = f'[data-wdauto="{kind}-{i}"]'
         self._count_entries(kind)  # re-tag in case the entry re-rendered
         css = self._field(entry, aids)
@@ -117,7 +118,7 @@ class MyExperiencePage(BasePage):
             if value not in (None, "", []):
                 r.skipped.append(f"{label} (not on this page)")
             return
-        self._do(r, label, value, lambda: self.w.fill_auto(css, value, desc=label, multi=multi))
+        self._do(r, label, value, lambda: self.w.fill_auto(css, value, desc=label, multi=multi, loose=loose))
 
     # ================================================================== sections
     def fill_resume(self, r: FillReport, path: str) -> None:
@@ -174,7 +175,9 @@ class MyExperiencePage(BasePage):
                 continue
             self._fill_in(r, "education", i, f"{tag} school", L.EDUCATION["school"], e.school)
             self._fill_in(r, "education", i, f"{tag} degree", L.EDUCATION["degree"], e.degree)
-            self._fill_in(r, "education", i, f"{tag} field of study", L.EDUCATION["field_of_study"], e.field_of_study)
+            # loose: a close option ('Artificial Intelligence and Robotics', 'Data Science') beats the fallbacks
+            self._fill_in(r, "education", i, f"{tag} field of study", L.EDUCATION["field_of_study"], e.field_of_study,
+                          loose=True)
             self._fill_in(r, "education", i, f"{tag} GPA", L.EDUCATION["gpa"], e.gpa)
             self._fill_in(r, "education", i, f"{tag} start year", L.EDUCATION["start_year"], e.start_year)
             self._fill_in(r, "education", i, f"{tag} end year", L.EDUCATION["end_year"], e.end_year)

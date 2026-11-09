@@ -25,7 +25,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from core import waits
 from core.actions import Actions
 from core.logger import get_logger
-from core.text import best_match, match_score, normalize, split_list
+from core.text import best_match, closest_by_words, key_words, match_score, normalize, split_list, word_overlap
 from core.waits import Locator
 from locators import common as C
 
@@ -220,19 +220,32 @@ class Widgets:
         self.act.click(checkbox or option, desc=desc)
 
     def select_prompt(self, field: Locator, input_: Locator, candidates: str | Sequence[str], desc: str,
-                      multi: bool = False) -> str | None:
-        """Pick a value in a prompt field. Each candidate may be a path: 'Job Board > LinkedIn'."""
+                      multi: bool = False, loose: bool = False) -> str | None:
+        """Pick a value in a prompt field. Each candidate may be a path: 'Job Board > LinkedIn'.
+
+        Candidates are tried in order, and the first choice wins:
+          * a value already in the field counts as done only if it matches the FIRST candidate;
+            if it only matches a fallback, the field is searched again for the better choices
+          * loose=True: when a candidate isn't found as written, its key words are searched one at
+            a time and the option sharing the most whole words is taken ('Data Analytics' →
+            'Data Science') BEFORE moving on to the next fallback
+        """
         wanted = split_list(candidates)
         if not wanted:
             return None
+        leaf = lambda w: w.split(">")[-1].strip()  # noqa: E731
 
+        first = leaf(wanted[0])
+        if self.prompt_has(field, [first]) or (loose and self._has_close(field, first)):
+            self.log.info("%s: already set (%s)", desc, self.prompt_selection_text(field))
+            return first
+        fallback = next((leaf(w) for w in wanted[1:] if self.prompt_has(field, [leaf(w)])), None)
+        if fallback and multi:
+            self.log.info("%s: already set (%s)", desc, self.prompt_selection_text(field))
+            return fallback
         pills = self.selected_pills(field)
-        for w in wanted:
-            leaf = w.split(">")[-1].strip()
-            if self.prompt_has(field, [leaf]):
-                current = self.prompt_selection_text(field) or ", ".join(pills)
-                self.log.info("%s: already set (%s)", desc, current)
-                return leaf
+        if fallback:
+            self.log.info("%s: currently the fallback %r; looking for %r first", desc, fallback, first)
         if pills and not multi:
             self.log.info("%s: replacing %s", desc, pills)
             self.clear_pills(field)
@@ -240,6 +253,8 @@ class Widgets:
         for candidate in wanted:
             path = [s.strip() for s in candidate.split(">") if s.strip()]
             label = self._search_and_pick(field, input_, path, desc)
+            if not label and loose and len(path) == 1:
+                label = self._search_by_words(field, input_, candidate, desc)
             if label:
                 if not multi:
                     self.act.close_popups()
@@ -247,6 +262,40 @@ class Widgets:
                 return label
             self.act.close_popups()  # never leave a list open: it covers the fields below it
         self.log.warning("%s: could not select any of %s", desc, wanted)
+        return None
+
+    def _has_close(self, field: Locator, candidate: str) -> bool:
+        """Does the field already hold an option sharing at least half the candidate's key words?"""
+        text = self.prompt_selection_text(field)
+        items = [i.strip() for i in text.split(",")[1:]] if "," in text else []
+        items += self.selected_pills(field)
+        return any(word_overlap(candidate, i) >= 0.5 for i in items)
+
+    def _search_by_words(self, field: Locator, input_: Locator, candidate: str, desc: str) -> str | None:
+        """Search each key word of the candidate on its own (longest first) and take the option that
+        shares the most whole words with the candidate."""
+        for word in key_words(candidate):
+            if len(word) < 3:
+                continue
+            box = self.act.focus(input_, desc=f"{desc} input")
+            self.act.clear(box)
+            box.send_keys(word)
+            found = self._wait_for_relevant_results(word, 1.5, trust_no_match=False)
+            if not found:
+                box.send_keys(Keys.ENTER)
+                found = self._wait_for_relevant_results(word, self.cfg.timeouts.prompt_results, trust_no_match=True)
+            options, labels = self._result_options()
+            match = closest_by_words(candidate, labels) if found else None
+            if match is None:
+                self.log.debug("%s: nothing close to %r when searching %r", desc, candidate, word)
+                self.act.clear(box)
+                continue
+            idx, label = match
+            self._click_prompt_option(options[idx], desc=f"{desc} option {label!r}")
+            if waits.poll(lambda: self.prompt_has(field, [label]), self.cfg.timeouts.short):
+                self.log.info("%s: %r not listed; closest by words: %r (searched %r)", desc, candidate, label, word)
+                return label
+            self.act.clear(box)
         return None
 
     def _search_and_pick(self, field: Locator, input_: Locator, path: list[str], desc: str) -> str | None:
@@ -455,7 +504,7 @@ class Widgets:
         """
         return self.driver.execute_script(js, field_css)
 
-    def fill_auto(self, field_css: str, value, desc: str, multi: bool = False):
+    def fill_auto(self, field_css: str, value, desc: str, multi: bool = False, loose: bool = False):
         """Fill a formField container with `value`, whatever kind of control it turns out to be.
         Returns something truthy on success, None/False on failure."""
         kind = self.detect(field_css)
@@ -465,7 +514,7 @@ class Widgets:
         if kind == "missing":
             return None
         if kind == "prompt":
-            return self.select_prompt(loc(), loc("input"), values, desc=desc, multi=multi)
+            return self.select_prompt(loc(), loc("input"), values, desc=desc, multi=multi, loose=loose)
         if kind == "dropdown":
             return self.select_dropdown(loc('button[aria-haspopup="listbox"]'), values, desc=desc)
         if kind == "date":

@@ -58,3 +58,37 @@ def best_match(candidates: Iterable[str], labels: Sequence[str]) -> tuple[int, s
 
 def same(a: str | None, b: str | None) -> bool:
     return normalize(a) == normalize(b)
+
+
+_STOPWORDS = {"and", "of", "the", "in", "for", "to", "a", "an", "with", "on", "or", "studies", "general"}
+
+
+# Words too generic to count as "similar" on their own: "Data Science" shouldn't match
+# "Computer Science" just because both say "science".
+_GENERIC = {"science", "sciences", "engineering", "technology", "technologies", "management", "arts",
+            "administration", "systems", "program", "programming", "language", "degree", "certificate"}
+
+
+def key_words(text: str | None) -> list[str]:
+    """Distinctive whole words, longest first: 'Data Analytics' → ['analytics', 'data'],
+    'Data Science' → ['data']. Generic words are kept only if there is nothing else."""
+    words = [w for w in re.findall(r"[a-z0-9+#]+", normalize(text)) if w not in _STOPWORDS and len(w) >= 2]
+    distinctive = [w for w in words if w not in _GENERIC] or words
+    return sorted(dict.fromkeys(distinctive), key=len, reverse=True)
+
+
+def word_overlap(candidate: str, label: str) -> float:
+    """Share of the candidate's key words that appear as whole words in the label (0..1)."""
+    want = key_words(candidate)
+    have = set(re.findall(r"[a-z0-9+#]+", normalize(label)))
+    return sum(w in have for w in want) / len(want) if want else 0.0
+
+
+def closest_by_words(candidate: str, labels: Sequence[str]) -> tuple[int, str] | None:
+    """Option sharing the most key words with the candidate; ties go to the shorter label."""
+    scored = [(word_overlap(candidate, l), -len(l), i) for i, l in enumerate(labels)]
+    scored = [s for s in scored if s[0] > 0]
+    if not scored:
+        return None
+    _, _, i = max(scored)
+    return i, labels[i]
