@@ -65,9 +65,10 @@ in search results; a missing skill is skipped with a warning).
 
 ## Phase 3: Questions, disclosures, review stop, batch
 
-**Status (2026-11-09):**
-- ✅ Application Questions: live on CIBC (11 questions answered from the Questions sheet).
-- ⏭ Next: Voluntary Disclosures (CIBC run reaches it), Review stop, `run.py` batch + Excel status write-back.
+**Status:** ✅ done (live run 2026-11-09), except the batch runner.
+- ✅ Application Questions, Voluntary Disclosures (terms checkbox), Self Identify (skipped: not on CIBC).
+- ✅ Review stop with s/k/f/r prompt; status written to the Jobs sheet; Submit guard.
+- ⏭ Not built: `run.py` batch runner. Carried over to the next version.
 
 **Goal:** complete end-to-end runs to Review, and batch mode.
 
@@ -90,6 +91,6 @@ in search results; a missing skill is skipped with a warning).
 
 ---
 
-## After V1 (not planned yet)
-Account creation and email verification · "Use My Last Application" path · LLM fallback for
+## After V1
+`run.py` batch runner (carried over from Phase 3) · Account creation and email verification · "Use My Last Application" path · LLM fallback for
 free-text questions · headless/CI runs · Allure/HTML reports.

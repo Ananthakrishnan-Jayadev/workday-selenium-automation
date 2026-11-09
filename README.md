@@ -3,9 +3,10 @@
 Fills Workday job applications from an Excel workbook, from the job URL through to the
 **Review** page, then stops so you can check the application and submit it yourself.
 
-> **Status (2026-11-09):** working end to end on CIBC up to **Voluntary Disclosures**:
-> job posting → Apply Manually → sign in → My Information → My Experience → Application Questions.
-> Next: Voluntary Disclosures, Review stop, batch runner. See [docs/PHASES.md](docs/PHASES.md).
+> **Status: V1 complete (2026-11-09).** Live on CIBC end to end: job posting → Apply Manually →
+> sign in → My Information → My Experience → Application Questions → Voluntary Disclosures →
+> **stops on Review**. You submit; the outcome goes back into the Jobs sheet.
+> Not built yet: the batch runner (`run.py`). Run jobs one at a time with `behave -D row=N`.
 
 ## Documents
 | Doc | What's in it |
@@ -42,7 +43,7 @@ set `CIBC_PASSWORD=...`, and put `ENV:CIBC_PASSWORD` in the Password cell.
 | Languages | language | Proficiency applies to every proficiency dropdown |
 | Skills | skill | must be Workday's **exact** skill name (a bracketed note is fine) |
 | Certifications | certificate | only used if the tenant has the section (CIBC doesn't) |
-| Questions | rule | keywords in the question → answer (see below) |
+| Questions | rule | keywords in the question → answer (see below), incl. the terms checkbox |
 
 **Writing values**
 - `A; B; C`: fallbacks, tried in order. The first one Workday has wins, and a later run replaces a
@@ -88,7 +89,10 @@ Fix it in the browser, then press Enter in the terminal.
 **Re-running is safe.** Values already correct are left alone, existing entries are filled in place
 (no duplicates), and an uploaded resume isn't uploaded twice.
 
-**The script never clicks Submit.** (Review stop and the final status prompt arrive with Phase 3.)
+**On the Review page the run stops.** Check the application, click Submit yourself if you're happy,
+then answer in the terminal: `s` submitted, `k` skipped, `f` failed, `r` review later. The answer is
+written to the Jobs sheet (Status, LastRun, Notes) and to the run's `result.json`. The script never
+clicks Submit: a guard refuses any footer button labelled Submit, and any button on the Review page.
 
 ## Things Workday does that the code handles
 | Behaviour | Handling |
@@ -106,7 +110,7 @@ Fix it in the browser, then press Enter in the terminal.
 ```
 features/   apply_job.feature, environment.py (hooks), steps/ (common_steps, auth_steps)
 pages/      base_page, job_posting_page, auth_page, my_information_page, my_experience_page,
-            questions_page
+            questions_page (Application Questions, Voluntary Disclosures, Self Identify)
 locators/   common, job_posting, auth, my_information, my_experience, questions
 core/       actions (robust click/type/focus), widgets (dropdown, prompt, date, upload, checkbox,
             auto-detect), text (matching), answers (Questions rules), excel_reader, models,
@@ -116,6 +120,11 @@ docs/       project docs + page_dumps/ (captured HTML is git-ignored)
 data/       applicant_data.xlsx, resume (git-ignored)
 reports/    run output (git-ignored)
 ```
+
+## Next (V2 ideas)
+- `run.py` batch runner: every Pending row, one browser per job, status written back.
+- Account creation + email verification, "Use My Last Application", headless runs.
+- More tenants: capture their pages (`tools/dump_page.py`) and extend `docs/LOCATORS.md`.
 
 ## Safety
 - The script **never clicks Submit**.
