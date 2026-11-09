@@ -240,9 +240,19 @@ class MyExperiencePage(BasePage):
             r.skipped.append("Skills (not on this page)")
             return
         for skill in skills:
-            self._do(r, f"Skill {skill}", skill,
-                     lambda: self.w.select_prompt(L.SKILLS_FIELD, L.SKILLS_INPUT, split_list(skill),
-                                                  desc=f"Skill {skill}", multi=True))
+            # Skills are optional on Workday: one that isn't in Workday's list is logged and skipped,
+            # it doesn't stop the run.
+            self.act.close_popups()
+            try:
+                got = self.w.select_prompt(L.SKILLS_FIELD, L.SKILLS_INPUT, split_list(skill),
+                                           desc=f"Skill {skill}", multi=True)
+            except Exception as exc:  # noqa: BLE001
+                self.log.warning("Skill %s failed: %s", skill, exc)
+                got = None
+            if got:
+                r.filled.append(f"Skill {skill}")
+            else:
+                r.skipped.append(f"Skill {skill} (no exact match in Workday's list, see log)")
         self.act.close_popups()
 
     def fill_websites(self, r: FillReport, urls: list[str]) -> None:

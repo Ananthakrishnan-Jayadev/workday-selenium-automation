@@ -25,8 +25,8 @@ from selenium.webdriver.remote.webelement import WebElement
 from core import waits
 from core.actions import Actions
 from core.logger import get_logger
-from core.text import (best_match, closest_by_words, key_words, match_score, normalize, split_list,
-                       strong_match, word_overlap)
+from core.text import (best_match, closest_by_words, contains_words, key_words, match_score, normalize,
+                       split_list, strong_match, word_overlap)
 from core.waits import Locator
 from locators import common as C
 
@@ -91,12 +91,19 @@ class Widgets:
             return None
 
         current = self.dropdown_value(button)
-        if any(match_score(w, current) >= 2 for w in wanted):
-            self.log.info("%s: already %r", desc, current)
+        if any(match_score(w, current) >= 2 or contains_words(w, current) for w in wanted):
+            self.log.info("%s: already %r", desc, current)  # e.g. 'Fluent' ~ '5 - Fluent'
             return current
 
-        for attempt in (1, 2):
-            self.act.click(button, desc=f"{desc} dropdown")
+        for attempt in (1, 2, 3):
+            if attempt < 3:
+                self.act.click(button, desc=f"{desc} dropdown")
+            else:  # the list wouldn't open on click: try the keyboard
+                el = self.act.find(button)
+                self.act.scroll_into_view(el)
+                el.send_keys(Keys.ENTER)
+                if self._open_listbox() is None:
+                    el.send_keys(Keys.ARROW_DOWN)
             listbox = self._open_listbox()
             if listbox is None:
                 self.log.debug("%s: listbox did not open (attempt %d)", desc, attempt)
@@ -310,7 +317,7 @@ class Widgets:
 
         for candidate in wanted:
             path = [s.strip() for s in candidate.split(">") if s.strip()]
-            label = self._search_and_pick(field, input_, path, desc)
+            label = self._search_and_pick(field, input_, path, desc, strict=multi)
             if not label and loose and len(path) == 1:
                 label = self._search_by_words(field, input_, candidate, desc)
             if label:
@@ -360,8 +367,13 @@ class Widgets:
                 return label
         return None
 
-    def _search_and_pick(self, field: Locator, input_: Locator, path: list[str], desc: str) -> str | None:
-        """Search for the first path segment, then walk down the hierarchy until a pill appears."""
+    def _search_and_pick(self, field: Locator, input_: Locator, path: list[str], desc: str,
+                         strict: bool = False) -> str | None:
+        """Search for the first path segment, then walk down the hierarchy until a pill appears.
+
+        strict (multi-select fields such as skills): only an exact option counts (a bracketed note
+        is allowed: 'Python (Programming Language)'), and options already selected are never clicked
+        again (Workday rejects duplicate skills). 'SQL Assistant' is a different skill from 'SQL'."""
         # "Canada (+1)" may not match Workday's search because of the brackets, so also try "Canada".
         terms = [path[0]]
         plain = re.sub(r"\s*\(.*?\)\s*", " ", path[0]).strip()
@@ -374,7 +386,9 @@ class Widgets:
             kind, auto = self._run_search(field, input_, term, desc)
             if kind == "auto":
                 # Enter with a single match: Workday selected it without showing a list.
-                if match_score(target, auto) >= 1 or match_score(term, auto) >= 1:
+                ok = (strong_match(target, auto) or strong_match(term, auto)) if strict else \
+                     (match_score(target, auto) >= 1 or match_score(term, auto) >= 1)
+                if ok:
                     self.log.info("%s: Workday selected %r for %r", desc, auto, term)
                     return auto
                 self.log.info("%s: Workday selected %r for %r, which isn't what we want; removing it",
@@ -396,7 +410,23 @@ class Widgets:
         trail: list[str] = []
         for _level in range(4):
             options, labels = self._result_options()
+            if strict:
+                selected = self._selection_items(field)
+                keep = [i for i, l in enumerate(labels) if l not in selected]
+                options, labels = [options[i] for i in keep], [labels[i] for i in keep]
             match = best_match([segments[0]], labels)
+            if strict and match and not strong_match(segments[0], match[1]):
+                self.act.settle(1.2)  # the exact option may still be loading
+                options, labels = self._result_options()
+                selected = self._selection_items(field)
+                pairs = [(o, l) for o, l in zip(options, labels) if l not in selected]
+                exact = next(((o, l) for o, l in pairs if strong_match(segments[0], l)), None)
+                if exact is None:
+                    self.log.warning("%s: no exact %r in Workday's list (has: %s). Not picking a near-miss; "
+                                     "put the exact name you want in Excel", desc, segments[0], labels[:15])
+                    return None
+                options, labels = [exact[0]], [exact[1]]
+                match = (0, exact[1])
             if match and not strong_match(segments[0], match[1]):
                 # Only a partial match ('SQL Assistant' for 'SQL'): the exact option may still be loading.
                 self.act.settle(1.2)

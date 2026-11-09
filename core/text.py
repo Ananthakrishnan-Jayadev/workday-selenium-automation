@@ -104,3 +104,10 @@ def strong_match(wanted: str, label: str) -> bool:
         return True
     longer, shorter = (l, w) if len(l) > len(w) else (w, l)
     return longer.startswith(shorter) and longer[len(shorter):].lstrip().startswith("(")
+
+
+def contains_words(wanted: str, label: str) -> bool:
+    """`wanted` appears in `label` as whole words: 'Fluent' in '5 - Fluent' → True,
+    'Male' in 'Female' → False."""
+    w, l = normalize(wanted), normalize(label)
+    return bool(w) and re.search(rf"(?<![a-z0-9]){re.escape(w)}(?![a-z0-9])", l) is not None
