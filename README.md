@@ -37,7 +37,7 @@ set `CIBC_PASSWORD=...`, and put `ENV:CIBC_PASSWORD` in the Password cell.
 |---|---|---|
 | Jobs | job URL | `Status = Pending` to include it |
 | Accounts | company | an **existing** Workday account (V1 doesn't create accounts) |
-| Profile | field (key/value) | name, address, phone, How did you hear, LinkedIn, Website, ResumePath |
+| Profile | field (key/value) | name, address, phone, How did you hear, LinkedIn, Website, ResumePath, CoverLetterPath (optional) |
 | WorkExperience | job | dates as month name + year; `CurrentlyWorkHere = Yes` hides the end date |
 | Education | school | Degree / FieldOfStudy can list fallbacks |
 | Languages | language | Proficiency applies to every proficiency dropdown |
@@ -87,7 +87,7 @@ fill, validation errors after Save and Continue, unanswered required questions w
 Fix it in the browser, then press Enter in the terminal.
 
 **Re-running is safe.** Values already correct are left alone, existing entries are filled in place
-(no duplicates), and an uploaded resume isn't uploaded twice.
+(no duplicates), and a resume or cover letter already listed isn't uploaded twice.
 
 **On the Review page the run stops.** Check the application, click Submit yourself if you're happy,
 then answer in the terminal: `s` submitted, `k` skipped, `f` failed, `r` review later. The answer is

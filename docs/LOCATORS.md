@@ -144,6 +144,7 @@ Notes:
 | Skills | `formField-skills` → `input#skills--skills` (prompt, multi). Shows "No Items." until Enter; once skills are selected the `selectedItemList` covers the input (focus it via JS). Workday rejects duplicates ("You cannot enter duplicate skills") | ✅ RUN |
 | Resume input | `input[type=file][data-automation-id="file-upload-input-ref"]` next to `select-files` button, "Upload a file (5MB max) *" (required) | ✅ RUN |
 | Uploaded file row | ❓ (detected by the file name appearing in the Resume/CV section) | ❓ |
+| Cover letter | CIBC: same Resume/CV upload ("upload all applicable documents ... resume/CV, cover letter"). Other tenants: a visible "Cover Letter" section with its own `input[type=file]`, used when present | CIBC ✅ RUN / other ⚠️ |
 | Websites entry field | `formField-url`? | ❓ |
 | LinkedIn | `input[name="linkedInAccount"]` | ✅ RUN |
 | Back button | `pageFooterBackButton` | ✅ RUN |

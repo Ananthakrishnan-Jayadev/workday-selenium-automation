@@ -53,7 +53,8 @@ SHEETS: dict[str, dict] = {
             ["PreviouslyWorkedHere", "No", "Yes / No"],
             ["LinkedIn", "https://www.linkedin.com/in/your-profile/", "Phase 2"],
             ["Website", "", "Phase 2"],
-            ["ResumePath", "/home/you/Documents/resume.pdf", "Phase 2: absolute path to your resume"],
+            ["ResumePath", "/home/you/Documents/resume.pdf", "Absolute path to your resume (5MB max)"],
+            ["CoverLetterPath", "", "Optional: absolute path to your cover letter (5MB max)"],
         ],
     },
     # ---- Phase 2 -------------------------------------------------------------------------

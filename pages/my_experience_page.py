@@ -121,15 +121,23 @@ class MyExperiencePage(BasePage):
         self._do(r, label, value, lambda: self.w.fill_auto(css, value, desc=label, multi=multi, loose=loose))
 
     # ================================================================== sections
-    def fill_resume(self, r: FillReport, path: str) -> None:
-        if not path:
-            r.skipped.append("Resume (no ResumePath in Profile)")
-            return
-        if not self._section_present("resume"):
-            r.skipped.append("Resume (not on this page)")
-            return
-        self._do(r, "Resume", path, lambda: self.w.upload_file(L.RESUME_FILE_INPUT, path, L.RESUME_SECTION,
-                                                               desc="Resume"))
+    def fill_documents(self, r: FillReport, resume: str, cover_letter: str) -> None:
+        """Resume, then cover letter. The cover letter goes into the tenant's Cover Letter section if it
+        has one, otherwise into the Resume/CV upload (which accepts several files on CIBC). Each upload
+        uses the file input inside its own section; a file already listed there isn't uploaded again."""
+        docs = [("Resume", "ResumePath", resume, "resume"), ("Cover letter", "CoverLetterPath", cover_letter, None)]
+        for label, key, path, kind in docs:
+            if not path:
+                r.skipped.append(f"{label} (no {key} in Profile)")
+                continue
+            if kind is None:  # cover letter: own section if present, else the resume section
+                own = L.section(L.SECTION_HEADINGS["cover_letter"])
+                kind = "cover_letter" if waits.is_visible(self.driver, own) else "resume"
+            if not self._section_present(kind):
+                r.skipped.append(f"{label} (no upload section on this page)")
+                continue
+            sect = L.section(L.SECTION_HEADINGS[kind])
+            self._do(r, label, path, lambda: self.w.upload_file(L.file_input_in(sect), path, sect, desc=label))
 
     def fill_work(self, r: FillReport, entries: list[WorkEntry]) -> None:
         if entries and not self._section_present("work"):
@@ -277,7 +285,7 @@ class MyExperiencePage(BasePage):
         p = data.profile
         r = FillReport(page=self.NAME)
 
-        self.fill_resume(r, p.get("ResumePath"))
+        self.fill_documents(r, p.get("ResumePath"), p.get("CoverLetterPath"))
         self.fill_work(r, data.work)
         self.fill_education(r, data.education)
         self.fill_certifications(r, data)

@@ -24,6 +24,7 @@ SECTION_HEADINGS = {
     "websites": "Websites",
     "skills": "Skills",
     "resume": "Resume/CV",
+    "cover_letter": "Cover Letter",
 }
 
 
@@ -86,6 +87,14 @@ RESUME_FILE_INPUT = (By.CSS_SELECTOR, 'input[type="file"][data-automation-id="fi
                                       'input[type="file"][data-automation-id="file-upload-input-file"], '
                                       'input[type="file"]')
 RESUME_SECTION = section("Resume/CV")
+# Some tenants have a separate Cover Letter section; CIBC takes all documents in Resume/CV
+# ("Please upload all applicable documents ... resume/CV, cover letter and any additional documents").
+COVER_LETTER_SECTION = section("Cover Letter")
+
+
+def file_input_in(section_locator):
+    """The (hidden) <input type=file> inside a section."""
+    return (By.XPATH, f"({section_locator[1]}//input[@type='file'])[1]")
 # Unverified: the uploaded-file row. We also look for the file name anywhere in the section.
 UPLOADED_FILE = (By.CSS_SELECTOR, '[data-automation-id="file-upload-successful"], '
                                   '[data-automation-id="file-upload-item"], [data-automation-id="fileName"]')
