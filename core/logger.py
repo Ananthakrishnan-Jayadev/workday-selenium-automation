@@ -13,7 +13,21 @@ def get_logger() -> logging.Logger:
     return logging.getLogger(LOGGER_NAME)
 
 
+def _utf8_console() -> None:
+    """Make the terminal output UTF-8. Log lines contain characters such as '→'; a Windows console
+    using a legacy code page (cp1252) can't print them and Python reports 'Logging error' for every
+    such line. errors='replace' means an unprintable character becomes '?' instead of an error."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)  # absent if something replaced the stream
+        if reconfigure:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def setup_logging(log_file: Path | None = None, console_level: int = logging.INFO) -> logging.Logger:
+    _utf8_console()
     log = get_logger()
     log.setLevel(logging.DEBUG)
     log.propagate = False

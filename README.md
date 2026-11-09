@@ -21,16 +21,41 @@ Fills Workday job applications from an Excel workbook, from the job URL through 
 ## Setup
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate              # each new terminal; Windows: see below
 pip install -r requirements.txt
 python tools/make_template.py          # creates data/applicant_data.xlsx (won't overwrite)
 ```
-Tested with Python 3.14, Selenium 4.52, behave 1.3.3. Chrome/Chromium or Firefox must be installed.
+`activate` must be *sourced*, not executed (`.venv/bin/activate` on its own gives "Permission denied").
+Without activating you can call `.venv/bin/behave` directly. Don't use `sudo`.
+
+Tested on Linux (Ubuntu) with Python 3.14, Selenium 4.52, behave 1.3.3. Chrome/Chromium or Firefox must be installed.
 A snap-packaged browser (Ubuntu's default) uses the snap's own driver automatically; otherwise Selenium
 Manager downloads one. Override in `config/config.yaml` → `browser.driver_path` / `browser.binary`.
 
 Passwords can go straight into the Accounts sheet, or into `.env`: copy `.env.example` to `.env`,
 set `CIBC_PASSWORD=...`, and put `ENV:CIBC_PASSWORD` in the Password cell.
+
+### Running on Windows
+Not yet tried on Windows, but nothing in the code is Linux-only. In PowerShell:
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1             # each new terminal
+pip install -r requirements.txt
+python tools\make_template.py
+behave -D slow_mo_ms=200
+```
+- If PowerShell won't run `Activate.ps1`, allow local scripts once:
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. Or skip activating and run
+  `.venv\Scripts\behave -D slow_mo_ms=200`. (In cmd.exe the activate script is `.venv\Scripts\activate.bat`.)
+- Install **Google Chrome** (or Firefox). Selenium Manager downloads the matching driver; the
+  snap-driver handling above only applies on Linux.
+- **File paths in the workbook are per machine.** `ResumePath` and `CoverLetterPath` in the Profile sheet
+  must be Windows paths, e.g. `C:\Users\you\workday-selenium\data\resume.pdf`. The `data\` folder isn't
+  in git: copy the workbook, resume and cover letter over yourself.
+- The console is switched to UTF-8 automatically, so log lines with `→` print correctly. If an old
+  console still shows `?` instead of the arrow, it's cosmetic; `run.log` is always UTF-8.
+- Close the workbook in Excel before a run finishes. Excel locks the file, so the status can't be
+  written back (the run warns and keeps the status in `result.json`).
 
 ## The workbook (`data/applicant_data.xlsx`)
 | Sheet | One row per | Notes |
