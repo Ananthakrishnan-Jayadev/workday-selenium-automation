@@ -28,7 +28,9 @@ class Session:
     @classmethod
     def create(cls, driver: WebDriver, cfg: Config, reporter: Reporter) -> "Session":
         act = Actions(driver, cfg)
-        return cls(driver=driver, cfg=cfg, reporter=reporter, act=act, widgets=Widgets(act))
+        widgets = Widgets(act)
+        widgets.debug_capture = lambda name: reporter.capture(driver, name, html=True)
+        return cls(driver=driver, cfg=cfg, reporter=reporter, act=act, widgets=widgets)
 
     @property
     def log(self):

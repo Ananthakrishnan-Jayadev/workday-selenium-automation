@@ -63,6 +63,8 @@ class Widgets:
         self.driver = act.driver
         self.cfg = act.cfg
         self.log = get_logger()
+        # Optional hook (set by Session): save a screenshot + HTML when a search finds nothing.
+        self.debug_capture = None
 
     # ============================================================== dropdown (button + listbox)
     def dropdown_value(self, button: Locator) -> str:
@@ -182,24 +184,34 @@ class Widgets:
                 labels.append(label)
         return opts, labels
 
-    def _wait_for_relevant_results(self, term: str, timeout: float) -> bool:
-        """Wait until the list shows an option matching `term` and has stopped changing.
+    def _wait_for_relevant_results(self, term: str, timeout: float, trust_no_match: bool) -> bool:
+        """Wait until the list shows an option matching `term` (exact, starts-with or contains).
 
-        Only a list that contains a match counts. Workday often shows an unrelated list first
-        ('No Items.', or the full A-Z list for Field of Study) and replaces it with the real
-        results later; accepting any list that merely appeared is what broke Field of Study."""
+        Only a list that contains a match counts: Workday often shows an unrelated list first
+        ('No Items.', or the full A-Z list for Field of Study) and the real results later.
+        'No matches found' ends the wait only when trust_no_match is set (after Enter) and it has
+        stayed on screen for about a second: a stale one can linger from before the search."""
         end = time.monotonic() + timeout
         time.sleep(0.4)
-        last, stable = None, 0
+        last_trace, no_match_polls, seen_match = None, 0, None
         while time.monotonic() < end:
-            if self._no_matches():
-                return False
             _, labels = self._result_options()
-            if labels and best_match([term], labels) is not None:
-                stable = stable + 1 if labels == last else 0
-                if stable >= 2:  # unchanged across 2 polls (~0.6s)
+            no_match = self._no_matches()
+            trace = (tuple(labels[:6]), no_match)
+            if trace != last_trace:
+                self.log.debug("  search %r: %d options %s%s", term, len(labels), labels[:6],
+                               " + 'No matches found'" if no_match else "")
+                last_trace = trace
+            match = best_match([term], labels) if labels else None
+            if match:
+                if seen_match == labels:  # same list on two polls in a row: settled
                     return True
-            last = labels
+                seen_match = labels
+            else:
+                seen_match = None
+            no_match_polls = no_match_polls + 1 if (no_match and not labels) else 0
+            if trust_no_match and no_match_polls >= 8:  # ~2.5s: it can flash up while the search runs
+                return False
             time.sleep(0.3)
         return False
 
@@ -253,15 +265,18 @@ class Widgets:
             # Some lists filter as you type; others (skills, field of study, "how did you hear")
             # only search on Enter. Enter is pressed only if typing alone didn't show a match,
             # because on a filtered list Enter can pick the highlighted option.
-            found = self._wait_for_relevant_results(term, 1.5)
-            if not found and not self._no_matches():
+            found = self._wait_for_relevant_results(term, 1.5, trust_no_match=False)
+            if not found:
                 box.send_keys(Keys.ENTER)
-                found = self._wait_for_relevant_results(term, self.cfg.timeouts.prompt_results)
+                found = self._wait_for_relevant_results(term, self.cfg.timeouts.prompt_results,
+                                                        trust_no_match=True)
             if found:
                 break
             _, seen = self._result_options()
             self.log.info("%s: no option matching %r%s", desc, term,
                           " (No matches found)" if self._no_matches() else f". List showed: {seen[:15]}")
+            if self.debug_capture:
+                self.debug_capture(f"prompt_no_match_{term}")
             self.act.clear(box)
         if not found:
             return None

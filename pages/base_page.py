@@ -48,6 +48,8 @@ class BasePage:
     def current_page(self) -> str | None:
         """Name of the current page: job_posting, sign_in, create_account, my_information, ..., or None."""
         try:
+            if waits.is_visible(self.driver, C.ERROR_PAGE):
+                return "error"
             for name, markers in C.PAGE_MARKERS.items():
                 if any(waits.is_present(self.driver, m) for m in markers):
                     return name
@@ -73,6 +75,46 @@ class BasePage:
         accept = names if callable(names) else (lambda p: p in names)
         t = self.cfg.timeouts.page_change if timeout is None else timeout
         return waits.poll(lambda: (lambda p: p if p and accept(p) else None)(self.current_page()), t)
+
+    def is_error_page(self) -> bool:
+        return waits.is_visible(self.driver, C.ERROR_PAGE)
+
+    def recover_from_error_page(self, max_refreshes: int = 2) -> bool:
+        """Workday sometimes shows 'Something went wrong. Please refresh the page' (seen right after
+        sign-in). Refresh up to `max_refreshes` times. Returns True if the page is OK afterwards."""
+        for attempt in range(1, max_refreshes + 1):
+            if not self.is_error_page():
+                return True
+            self.log.warning("Workday error page ('Something went wrong'), refreshing (%d/%d)",
+                             attempt, max_refreshes)
+            self.s.checkpoint("error_page")
+            self.driver.refresh()
+            loaded = self.wait_for_page(lambda p: p not in (None, "error"), self.cfg.timeouts.page_change)
+            if loaded:
+                self.log.info("after refresh: %s", loaded)
+        return not self.is_error_page()
+
+    def wait_for_form(self, name: str, max_refreshes: int = 2) -> bool:
+        """Wait for a page's own form marker (not just the step bar). If Workday shows its error
+        screen, or the form doesn't appear in time, refresh and wait again (up to max_refreshes)."""
+        markers = C.PAGE_MARKERS[name]
+
+        def state():
+            if any(waits.is_present(self.driver, m) for m in markers):
+                return "ok"
+            return "error" if self.is_error_page() else None
+
+        for attempt in range(max_refreshes + 1):
+            result = waits.poll(state, self.cfg.timeouts.page_change)
+            if result == "ok":
+                return True
+            if attempt == max_refreshes:
+                break
+            reason = "error page" if result == "error" else "form did not load"
+            self.log.warning("%s: %s, refreshing (%d/%d)", name, reason, attempt + 1, max_refreshes)
+            self.s.checkpoint(f"{name}_refresh")
+            self.driver.refresh()
+        return False
 
     # ------------------------------------------------------------------ errors
     def _texts(self, locator) -> list[str]:

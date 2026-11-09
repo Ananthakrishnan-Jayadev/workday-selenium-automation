@@ -67,6 +67,12 @@ ERROR_SUMMARY = aid("errorHeading")
 OTHER_ERRORS = [aid("errorMessage"), aid("errorBanner")]  # unverified, other tenants
 INVALID_FIELDS = (By.CSS_SELECTOR, '[aria-invalid="true"]')
 
+# ---- Workday's "Something went wrong / Please refresh the page" screen (no automation id) ----------
+# Seen right after sign-in on CIBC (cibc run 2026-11-09); a page refresh fixes it.
+ERROR_PAGE = (By.XPATH, "//h1[contains(normalize-space(.), 'Something went wrong')]"
+                        " | //div[contains(normalize-space(.), 'Please refresh the page and then try again')]"
+                        "[not(.//div[contains(normalize-space(.), 'Please refresh the page')])]")
+
 # ---- Popups ----------------------------------------------------------------------------------
 POPUP_FRAME = aid("wd-popup-frame")
 POPUP_CLOSE = (By.CSS_SELECTOR, '[data-automation-id="wd-popup-frame"] [data-automation-id="closeButton"]')

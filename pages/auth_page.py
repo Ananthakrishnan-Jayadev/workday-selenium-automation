@@ -62,6 +62,8 @@ class AuthPage(BasePage):
 
         def outcome():
             page = self.current_page()
+            if page == "error":
+                return ("error_page", "")
             if page in APPLICATION_PAGES:
                 return ("ok", page)
             errors = self._sign_in_errors()
@@ -70,6 +72,13 @@ class AuthPage(BasePage):
             return None
 
         result = waits.poll(outcome, self.cfg.timeouts.page_change)
+        if result and result[0] == "error_page":
+            # Workday's "Something went wrong" screen right after sign-in: a refresh fixes it.
+            if self.recover_from_error_page():
+                result = waits.poll(outcome, self.cfg.timeouts.page_change)
+            else:
+                return SignInResult(False, "error", "Workday showed 'Something went wrong' and refreshing "
+                                                    "did not fix it")
         if result is None:
             return SignInResult(False, self.current_page(),
                                 "Still on the sign-in page after clicking Sign In (no error shown). "
