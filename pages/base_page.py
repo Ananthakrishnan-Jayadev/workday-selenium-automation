@@ -160,7 +160,11 @@ class BasePage:
         """Click Save and Continue and wait for the page to change. Returns errors if it doesn't."""
         before = self.current_page()
         before_marker = self.current_marker()
-        loc, _ = waits.first_present(self.driver, C.NEXT_BUTTONS, self.cfg.timeouts.default, visible_only=True)
+        loc, button = waits.first_present(self.driver, C.NEXT_BUTTONS, self.cfg.timeouts.default, visible_only=True)
+        label = normalize(button.text or button.get_attribute("aria-label") or "")
+        if "submit" in label or self.current_page() == "review":
+            # Hard safety stop: on Review the same footer button submits the application.
+            raise AssertionError(f"Refusing to click {button.text!r}: the script never submits an application")
         self.act.click(loc, desc="Save and Continue")
 
         start = time.monotonic()

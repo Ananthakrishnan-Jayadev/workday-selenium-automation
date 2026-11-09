@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 from core.config import load_config  # noqa: E402
 from core.driver import create_driver  # noqa: E402
 from core.excel_reader import load_app_data  # noqa: E402
+from core.excel_writer import update_job_status  # noqa: E402
 from core.logger import get_logger, setup_logging  # noqa: E402
 from core.models import Job  # noqa: E402
 from core.reporter import Reporter  # noqa: E402
@@ -80,10 +81,15 @@ def after_scenario(context, scenario):
 
     s.reporter.write_result(url=context.job.url, company=context.job.company, row=context.job.row,
                             **context.outcome)
+    if context.job.row and context.outcome.get("status") != "InProgress":
+        update_job_status(context.cfg.paths.workbook_path, context.job.row, context.outcome["status"],
+                          context.outcome.get("notes", ""))
     log.info("result: %s %s", context.outcome["status"], context.outcome.get("notes", ""))
     log.info("run folder: %s", s.reporter.run_dir)
 
-    keep_open = (failed and s.cfg.behaviour.keep_browser_open_on_failure) or s.cfg.behaviour.pause_at_end
+    answered = context.outcome.get("status") in ("Submitted", "Skipped", "Failed", "ReadyForReview") and not failed
+    keep_open = (failed and s.cfg.behaviour.keep_browser_open_on_failure) or (s.cfg.behaviour.pause_at_end
+                                                                            and not answered)
     if keep_open and sys.stdin.isatty() and not s.cfg.browser.headless:
         try:
             input("\nBrowser left open for you to inspect. Press Enter to close it... ")

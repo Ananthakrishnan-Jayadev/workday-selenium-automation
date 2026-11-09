@@ -16,7 +16,8 @@ PAGE_MARKERS = {
     "application_questions": [aid("applyFlowPrimaryQuestionsPage"), aid("applyFlowSecondaryQuestionsPage")],
     "voluntary_disclosures": [aid("applyFlowVoluntaryDisclosuresPage")],
     "self_identify": [aid("applyFlowSelfIdentifyPage"), aid("selfIdentificationPage")],  # unverified
-    "review": [aid("applyFlowReviewPage"), aid("reviewPanel"), aid("summaryView")],       # unverified
+    "review": [aid("applyFlowReviewPage"), aid("reviewPanel"), aid("summaryView")],       # unverified;
+    # falls back to the progress-bar step name "Review" (verified on CIBC)
 }
 
 # Progress-bar step names → page name (fallback when no marker matches).

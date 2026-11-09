@@ -89,3 +89,15 @@ class QuestionsPage(BasePage):
 
 class ApplicationQuestionsPage(QuestionsPage):
     pass
+
+
+class VoluntaryDisclosuresPage(QuestionsPage):
+    NAME = "Voluntary Disclosures"
+    PAGE_SCOPE = "Disclosure"
+    ROOT_CSS = L.DISCLOSURES_ROOT_CSS
+
+
+class SelfIdentifyPage(QuestionsPage):
+    NAME = "Self Identify"
+    PAGE_SCOPE = "SelfIdentify"
+    ROOT_CSS = L.SELF_IDENTIFY_ROOT_CSS

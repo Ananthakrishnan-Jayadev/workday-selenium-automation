@@ -25,3 +25,11 @@ return fields.map(f => {
     return [f.getAttribute('data-automation-id'), raw.replace(/\\s*\\*\\s*$/, '').replace(/\\s+/g, ' '), required];
 });
 """
+
+# Voluntary Disclosures (verified: CIBC run 2026-11-09). On CIBC it only holds the required
+# "I agree to the above" terms checkbox (formField-acceptTermsAndAgreements, label instead of legend);
+# US tenants put gender / ethnicity / veteran questions here.
+DISCLOSURES_ROOT_CSS = '[data-automation-id="applyFlowVoluntaryDisclosuresPage"]'
+
+# Self Identify (disability form, mostly US tenants). Unverified: CIBC has no such step.
+SELF_IDENTIFY_ROOT_CSS = '[data-automation-id="applyFlowSelfIdentifyPage"], [data-automation-id="selfIdentificationPage"]'

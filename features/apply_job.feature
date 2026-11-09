@@ -13,4 +13,7 @@ Feature: Apply to a Workday job
     And I complete the "My Information" page
     And I complete the "My Experience" page
     And I complete the "Application Questions" page
-    Then I should be on the "Voluntary Disclosures" page
+    And I complete the "Voluntary Disclosures" page
+    And I complete the "Self Identify" page
+    Then I should be on the "Review" page
+    And I wait for the user to review and submit

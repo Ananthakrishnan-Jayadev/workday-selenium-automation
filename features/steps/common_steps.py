@@ -1,6 +1,8 @@
 """Steps shared by every job: loading data, opening the posting, page checks, completing a page."""
 from __future__ import annotations
 
+import sys
+
 from behave import given, then, when
 
 from core.logger import get_logger
@@ -8,7 +10,7 @@ from pages.base_page import BasePage
 from pages.job_posting_page import JobPostingPage
 from pages.my_experience_page import MyExperiencePage
 from pages.my_information_page import MyInformationPage
-from pages.questions_page import ApplicationQuestionsPage
+from pages.questions_page import ApplicationQuestionsPage, SelfIdentifyPage, VoluntaryDisclosuresPage
 
 log = get_logger()
 
@@ -17,7 +19,8 @@ PAGES = {
     "my information": ("my_information", MyInformationPage),
     "my experience": ("my_experience", MyExperiencePage),
     "application questions": ("application_questions", ApplicationQuestionsPage),
-    # Next: "voluntary disclosures", "self identify"
+    "voluntary disclosures": ("voluntary_disclosures", VoluntaryDisclosuresPage),
+    "self identify": ("self_identify", SelfIdentifyPage),
 }
 PAGE_NAMES = {
     "my information": "my_information",
@@ -130,3 +133,39 @@ def step_on_page(context, title):
     assert actual == expected, (f'Expected the "{title}" page but on {page.current_page()!r} '
                                 f'(step: {page.active_step_name()!r})')
     context.outcome = {"status": "InProgress", "notes": f"reached {title}"}
+
+
+STATUS_KEYS = {"s": "Submitted", "k": "Skipped", "f": "Failed", "r": "ReadyForReview"}
+
+
+@then("I wait for the user to review and submit")
+def step_wait_for_user(context):
+    """The script stops here. It never clicks Submit: you review the application in the browser,
+    submit it yourself (or not), and say what happened."""
+    s = context.session
+    s.checkpoint("review_page")
+    context.outcome = {"status": "ReadyForReview", "notes": "stopped on Review"}
+    if s.cfg.browser.headless or not sys.stdin.isatty():
+        log.info("Review reached; no terminal to ask, leaving status ReadyForReview")
+        return
+    print("\n" + "=" * 78)
+    print(f"  REVIEW: {context.job.company} | {context.job.url}")
+    print("  The application is filled in and waiting on the Review page.")
+    print("  Check it in the browser and click Submit YOURSELF if you're happy with it.")
+    print("  Then type:  s = submitted   k = skipped (not submitting)   f = failed   r = review later")
+    print("=" * 78)
+    while True:
+        try:
+            answer = input("  status [s/k/f/r]: ").strip().lower()[:1]
+        except EOFError:
+            answer = "r"
+        if answer in STATUS_KEYS:
+            break
+    note = ""
+    if answer in ("k", "f"):
+        try:
+            note = input("  note (optional): ").strip()
+        except EOFError:
+            pass
+    context.outcome = {"status": STATUS_KEYS[answer], "notes": note or f"{STATUS_KEYS[answer]} by user"}
+    log.info("user marked the job: %s %s", context.outcome["status"], note)
