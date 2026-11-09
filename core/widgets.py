@@ -1,0 +1,513 @@
+"""Workday's custom form controls.
+
+* Dropdown: `button[aria-haspopup="listbox"]` → click → a [role=listbox] popup (appended at the end of
+  <body>) → click the [role=option]. These are NOT <select> elements, so Selenium's Select() won't work.
+* Prompt (multiselect / search) field: type into the input, press Enter to search, wait for
+  [data-automation-id=promptOption] results (or "No matches found"), click the match. The chosen value
+  shows up as a "pill" in selectedItemList. Some prompts are hierarchical: clicking a category opens a
+  sub-list. Write such values as "Category > Value" in Excel.
+* Radio / checkbox: the input may be visually hidden, so click its <label> and verify the state.
+
+Every select_* method returns the label it ended up with, or None if it couldn't (and logs the options
+that were available, so the Excel value can be corrected).
+"""
+from __future__ import annotations
+
+import re
+import time
+from typing import Sequence
+
+from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.remote.webelement import WebElement
+
+from core import waits
+from core.actions import Actions
+from core.logger import get_logger
+from core.text import best_match, match_score, normalize, split_list
+from core.waits import Locator
+from locators import common as C
+
+_JS_VISIBLE_PROMPT_OPTIONS = """
+return [...document.querySelectorAll('[data-automation-id="promptOption"]')].filter(o =>
+    o.getClientRects().length > 0 &&
+    !o.closest('[data-automation-id="selectedItemList"], [data-automation-id="selectedItem"]'));
+"""
+
+# The checkbox (multi-select) or radio button (sub-lists) that belongs to one prompt option row,
+# not a neighbouring row's.
+_JS_OPTION_CHECKBOX = """
+let el = arguments[0];
+for (let i = 0; i < 5 && el; i++) {
+    const cb = el.querySelector('input[type="checkbox"][data-automation-id="checkboxPanel"], '
+                              + 'input[type="radio"][data-automation-id="radioBtn"]');
+    if (cb) return cb;
+    el = el.parentElement;
+    if (!el || el.querySelectorAll('[data-automation-id="promptOption"]').length > 1) break;
+}
+return null;
+"""
+
+
+def _label(el: WebElement) -> str:
+    try:
+        return (el.get_attribute("data-automation-label") or el.text or "").strip()
+    except StaleElementReferenceException:
+        return ""
+
+
+class Widgets:
+    def __init__(self, act: Actions):
+        self.act = act
+        self.driver = act.driver
+        self.cfg = act.cfg
+        self.log = get_logger()
+
+    # ============================================================== dropdown (button + listbox)
+    def dropdown_value(self, button: Locator) -> str:
+        try:
+            return (self.act.find(button, self.cfg.timeouts.short).text or "").strip()
+        except WebDriverException:
+            return ""
+
+    def _open_listbox(self) -> WebElement | None:
+        def find():
+            boxes = [b for b in waits.visible_elements(self.driver, C.OPEN_LISTBOX)
+                     if b.find_elements(*C.LISTBOX_OPTION)]
+            return boxes[-1] if boxes else None  # Workday appends popups at the end of <body>
+        return waits.poll(find, self.cfg.timeouts.short)
+
+    def _listbox_options(self, listbox: WebElement) -> tuple[list[WebElement], list[str]]:
+        options = listbox.find_elements(*C.LISTBOX_OPTION)
+        return options, [_label(o) for o in options]
+
+    def select_dropdown(self, button: Locator, candidates: str | Sequence[str], desc: str) -> str | None:
+        wanted = split_list(candidates)
+        if not wanted:
+            return None
+
+        current = self.dropdown_value(button)
+        if any(match_score(w, current) >= 2 for w in wanted):
+            self.log.info("%s: already %r", desc, current)
+            return current
+
+        for attempt in (1, 2):
+            self.act.click(button, desc=f"{desc} dropdown")
+            listbox = self._open_listbox()
+            if listbox is None:
+                self.log.debug("%s: listbox did not open (attempt %d)", desc, attempt)
+                self.act.dismiss_overlays()
+                continue
+
+            options, labels = self._listbox_options(listbox)
+            match = best_match(wanted, labels)
+            if match is None:
+                match = self._listbox_type_ahead(wanted)
+                if match is not None:
+                    options, labels = match[2], [_label(o) for o in match[2]]
+                    match = match[:2]
+            if match is None:
+                self.log.warning("%s: none of %s found. Available: %s", desc, wanted, labels[:60])
+                self.act.dismiss_overlays()
+                return None
+
+            idx, label = match
+            try:
+                self.act.click(options[idx], desc=f"{desc} option {label!r}")
+            except Exception as exc:  # noqa: BLE001 - option went stale; retry the whole open/pick
+                self.log.debug("%s: clicking option failed (%s), retrying", desc, exc)
+                self.act.dismiss_overlays()
+                continue
+
+            if waits.poll(lambda: match_score(label, self.dropdown_value(button)) >= 1, self.cfg.timeouts.short):
+                self.log.info("%s: selected %r", desc, label)
+                return label
+            self.log.debug("%s: button shows %r after picking %r (attempt %d)",
+                           desc, self.dropdown_value(button), label, attempt)
+        self.log.warning("%s: could not select any of %s", desc, wanted)
+        return None
+
+    def _listbox_type_ahead(self, wanted: list[str]):
+        """Long lists may not render every option. Type the value so the listbox jumps to it, then re-read."""
+        for candidate in wanted:
+            self.act.press(candidate)
+            self.act.settle(0.6)
+            listbox = self._open_listbox()
+            if listbox is None:
+                return None
+            options, labels = self._listbox_options(listbox)
+            m = best_match([candidate], labels)
+            if m:
+                return m[0], m[1], options
+        return None
+
+    # ============================================================== prompt / multiselect
+    def selected_pills(self, field: Locator) -> list[str]:
+        try:
+            container = self.driver.find_element(*field)
+            return [_label(p) for p in container.find_elements(*C.SELECTED_PILL_LABEL)]
+        except WebDriverException:
+            return []
+
+    def clear_pills(self, field: Locator) -> None:
+        for _ in range(10):
+            try:
+                charms = self.driver.find_element(*field).find_elements(*C.PILL_DELETE)
+            except WebDriverException:
+                return
+            if not charms:
+                return
+            self.act.click(charms[0], desc="remove selected value")
+            self.act.settle(0.3)
+
+    def _visible_prompt_options(self) -> list[WebElement]:
+        return self.driver.execute_script(_JS_VISIBLE_PROMPT_OPTIONS) or []
+
+    def _no_matches(self) -> bool:
+        for el in waits.visible_elements(self.driver, C.PROMPT_NO_MATCHES):
+            if "no matches" in normalize(el.get_attribute("title") or el.text):
+                return True
+        return False
+
+    _PLACEHOLDERS = {"no items", "no items.", "loading", "loading..."}
+
+    def _result_options(self) -> tuple[list[WebElement], list[str]]:
+        """Visible, real options (not pills, not 'No Items.' placeholders, not unrendered blanks)."""
+        opts, labels = [], []
+        for o in self._visible_prompt_options():
+            label = _label(o)
+            if label and normalize(label) not in self._PLACEHOLDERS:
+                opts.append(o)
+                labels.append(label)
+        return opts, labels
+
+    def _wait_for_new_results(self, before: list[str], timeout: float) -> bool:
+        """Wait until the option list differs from `before` AND has stopped changing.
+
+        Workday shows a list (the full list, or 'No Items.') the moment the field is focused, then
+        replaces it with the search results a little later. Reading options straight away picks up
+        that stale list, which is what made skills and field of study fail."""
+        end = time.monotonic() + timeout
+        time.sleep(0.4)
+        last, stable = None, 0
+        while time.monotonic() < end:
+            if self._no_matches():
+                return False
+            _, labels = self._result_options()
+            if labels and labels != before:
+                stable = stable + 1 if labels == last else 0
+                if stable >= 2:  # unchanged across 2 polls (~0.6s)
+                    return True
+            last = labels
+            time.sleep(0.3)
+        return False
+
+    def _click_prompt_option(self, option: WebElement, desc: str) -> None:
+        checkbox = self.driver.execute_script(_JS_OPTION_CHECKBOX, option)
+        self.act.click(checkbox or option, desc=desc)
+
+    def select_prompt(self, field: Locator, input_: Locator, candidates: str | Sequence[str], desc: str,
+                      multi: bool = False) -> str | None:
+        """Pick a value in a prompt field. Each candidate may be a path: 'Job Board > LinkedIn'."""
+        wanted = split_list(candidates)
+        if not wanted:
+            return None
+
+        pills = self.selected_pills(field)
+        for w in wanted:
+            leaf = w.split(">")[-1].strip()
+            if self.prompt_has(field, [leaf]):
+                current = self.prompt_selection_text(field) or ", ".join(pills)
+                self.log.info("%s: already set (%s)", desc, current)
+                return leaf
+        if pills and not multi:
+            self.log.info("%s: replacing %s", desc, pills)
+            self.clear_pills(field)
+
+        for candidate in wanted:
+            path = [s.strip() for s in candidate.split(">") if s.strip()]
+            label = self._search_and_pick(field, input_, path, desc)
+            if label:
+                if not multi:
+                    self.act.close_popups()
+                self.log.info("%s: selected %r", desc, label)
+                return label
+            self.act.close_popups()  # never leave a list open: it covers the fields below it
+        self.log.warning("%s: could not select any of %s", desc, wanted)
+        return None
+
+    def _search_and_pick(self, field: Locator, input_: Locator, path: list[str], desc: str) -> str | None:
+        """Search for the first path segment, then walk down the hierarchy until a pill appears."""
+        # "Canada (+1)" may not match Workday's search because of the brackets, so also try "Canada".
+        terms = [path[0]]
+        plain = re.sub(r"\s*\(.*?\)\s*", " ", path[0]).strip()
+        if plain and plain != path[0]:
+            terms.append(plain)
+
+        found = False
+        for term in terms:
+            box = self.act.focus(input_, desc=f"{desc} input")
+            self.act.clear(box)
+            self.act.settle(0.3)
+            _, before = self._result_options()
+            box.send_keys(term)
+            # Some lists filter as you type; others (skills, "how did you hear") search on Enter.
+            found = self._wait_for_new_results(before, 1.5)
+            if not found and not self._no_matches():
+                box.send_keys(Keys.ENTER)
+                found = self._wait_for_new_results(before, self.cfg.timeouts.prompt_results)
+            if found:
+                break
+            self.log.debug("%s: no results for %r", desc, term)
+            self.act.clear(box)
+        if not found:
+            return None
+
+        segments = list(path)
+        trail: list[str] = []
+        for _level in range(4):
+            options, labels = self._result_options()
+            match = best_match([segments[0]], labels)
+            if match is None and len(segments) > 1:  # search may have jumped straight to the leaf
+                match = best_match([segments[-1]], labels)
+                if match:
+                    segments = [segments[-1]]
+            if match is None:
+                where = f" under {' > '.join(trail)}" if trail else ""
+                self.log.warning("%s: %r not found%s. Options there: %s", desc, segments[0], where, labels[:40])
+                return None
+
+            idx, label = match
+            self._click_prompt_option(options[idx], desc=f"{desc} option {label!r}")
+            self.act.settle(0.6)
+            target = segments[-1]
+
+            # Selected? (checked first: in multi-select lists the list re-renders after a pick, which
+            # must not be mistaken for a sub-list)
+            if self.prompt_has(field, [label, target]):
+                return " > ".join(trail + [label])
+
+            # A category opens a sub-list (different options, often with radio buttons): go one level down.
+            _, new_labels = self._result_options()
+            if new_labels and new_labels != labels:
+                trail.append(label)
+                self.log.debug("%s: %r opened a sub-list: %s", desc, label, new_labels[:30])
+                if len(segments) > 1:
+                    segments = segments[1:]
+                continue
+
+            if waits.poll(lambda: self.prompt_has(field, [label, target]), self.cfg.timeouts.short):
+                return " > ".join(trail + [label])
+            self.log.debug("%s: clicked %r but the field doesn't show it as selected", desc, label)
+            return None
+        return None
+
+    def prompt_selection_text(self, field: Locator) -> str:
+        """Workday's own accessibility text, e.g. '1 item selected, Indeed' or '0 items selected'."""
+        try:
+            el = self.driver.find_element(*field).find_element(*C.PROMPT_ARIA_INSTRUCTION)
+            return (el.get_attribute("textContent") or "").strip()
+        except WebDriverException:
+            return ""
+
+    def prompt_has(self, field: Locator, names: Sequence[str]) -> bool:
+        """True if the field reports one of `names` as selected.
+
+        Sources: the pills, plus Workday's accessibility text ("2 items selected, Python, SQL").
+        Matching is exact or starts-with, so a short skill like "Go" doesn't match "Google Cloud".
+        """
+        text = self.prompt_selection_text(field)
+        items = [i.strip() for i in text.split(",")[1:]] if "," in text else []
+        items += self.selected_pills(field)
+        return any(match_score(n, s) >= 2 or match_score(s, n) >= 2 for n in names for s in items if n and s)
+
+    # ============================================================== dates
+    _MONTHS = {m: i for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july",
+                                           "august", "september", "october", "november", "december"], 1)}
+
+    @classmethod
+    def month_number(cls, month: str) -> str:
+        m = normalize(month)
+        if m.isdigit():
+            return f"{int(m):02d}"
+        for name, num in cls._MONTHS.items():
+            if name.startswith(m[:3]) and len(m) >= 3:
+                return f"{num:02d}"
+        raise ValueError(f"Not a month: {month!r}")
+
+    _DATE_PLACEHOLDERS = {"mm", "dd", "yyyy", ""}
+
+    def _date_part_value(self, input_loc: Locator) -> str:
+        try:
+            el = self.driver.find_element(*input_loc)
+        except WebDriverException:
+            return ""
+        v = (el.get_attribute("aria-valuetext") or el.get_attribute("value") or "").strip()
+        return "" if v.lower() in self._DATE_PLACEHOLDERS else v
+
+    def fill_date(self, field_css: str, desc: str, month: str = "", year: str = "", day: str = "") -> bool:
+        """Workday date widget: Month / Day / Year spinbutton inputs, each covered by a visible
+        `dateSection<Part>-display` div. Click the display div (that focuses the input underneath),
+        clear what's there with Backspace, type the digits, Tab out, then verify each part from the
+        input's aria-valuetext and retype any part that didn't take."""
+        wanted = []
+        if month:
+            wanted.append(("Month", self.month_number(month)))
+        if day:
+            wanted.append(("Day", f"{int(day):02d}"))
+        if year:
+            wanted.append(("Year", str(year)))
+
+        def locs(part):
+            return ((By.CSS_SELECTOR, f'{field_css} [data-automation-id="dateSection{part}-display"]'),
+                    (By.CSS_SELECTOR, f'{field_css} [data-automation-id="dateSection{part}-input"]'))
+
+        def matches(part, val):
+            got = self._date_part_value(locs(part)[1])
+            return got.isdigit() and int(got) == int(val) if part != "Year" else got == val
+
+        parts = [(p, v) for p, v in wanted if waits.is_present(self.driver, locs(p)[1])]
+        if not parts:
+            self.log.warning("%s: no date inputs found in %s", desc, field_css)
+            return False
+
+        for attempt in (1, 2):
+            todo = [(p, v) for p, v in parts if not matches(p, v)]
+            if not todo:
+                break
+            for part, val in todo:
+                display, input_loc = locs(part)
+                target = display if waits.is_visible(self.driver, display) else input_loc
+                self.act.click(target, desc=f"{desc} {part.lower()}")
+                current = self._date_part_value(input_loc)
+                if current:
+                    self.act.press(Keys.BACKSPACE * len(current))
+                self.act.press(val)
+                self.act.settle(0.2)
+            self.act.press(Keys.TAB)
+            self.act.settle(0.4)
+
+        bad = [(p, v, self._date_part_value(locs(p)[1])) for p, v in parts if not matches(p, v)]
+        if bad:
+            self.log.warning("%s: date not accepted: %s", desc,
+                             ", ".join(f"{p} wanted {v} got {g or 'empty'}" for p, v, g in bad))
+            return False
+        self.log.info("%s: %s", desc, "/".join(v for _, v in parts))
+        return True
+
+    # ============================================================== file upload
+    def upload_file(self, input_: Locator, path: str, container: Locator, desc: str) -> bool:
+        """Send a file to a (usually hidden) <input type=file> and wait for its name to show up."""
+        from pathlib import Path as _P
+        file = _P(path).expanduser()
+        if not file.is_file():
+            self.log.warning("%s: file not found: %s", desc, file)
+            return False
+        # Match the full file name only: the stem alone ("resume") can appear in the section heading.
+        if file.name.lower() in self._text_of(container).lower():
+            self.log.info("%s: %s already uploaded", desc, file.name)
+            return True
+        el = self.act.find(input_)
+        el.send_keys(str(file.resolve()))
+        shown = waits.poll(lambda: file.name.lower() in self._text_of(container).lower(), self.cfg.timeouts.page_change)
+        (self.log.info if shown else self.log.warning)("%s: %s %s", desc, file.name,
+                                                        "uploaded" if shown else "did not appear after upload")
+        return bool(shown)
+
+    def _text_of(self, locator: Locator) -> str:
+        try:
+            return self.driver.find_element(*locator).text or ""
+        except WebDriverException:
+            return ""
+
+    # ============================================================== auto-detect
+    def detect(self, field_css: str) -> str:
+        """What kind of control is inside a formField container?"""
+        js = """
+        const f = document.querySelector(arguments[0]);
+        if (!f) return 'missing';
+        if (f.querySelector('[data-automation-id^="dateSection"]')) return 'date';
+        if (f.querySelector('[data-automation-id="multiselectInputContainer"], [data-automation-id="searchBox"]')) return 'prompt';
+        if (f.querySelector('button[aria-haspopup="listbox"]')) return 'dropdown';
+        if (f.querySelector('textarea')) return 'textarea';
+        if (f.querySelector('input[type="radio"]')) return 'radio';
+        if (f.querySelector('input[type="checkbox"]')) return 'checkbox';
+        if (f.querySelector('input')) return 'text';
+        return 'unknown';
+        """
+        return self.driver.execute_script(js, field_css)
+
+    def fill_auto(self, field_css: str, value, desc: str, multi: bool = False):
+        """Fill a formField container with `value`, whatever kind of control it turns out to be.
+        Returns something truthy on success, None/False on failure."""
+        kind = self.detect(field_css)
+        values = split_list(value) if not isinstance(value, bool) else []
+        loc = lambda sub="": (By.CSS_SELECTOR, f"{field_css} {sub}".strip())  # noqa: E731
+        self.log.debug("%s: %s field", desc, kind)
+        if kind == "missing":
+            return None
+        if kind == "prompt":
+            return self.select_prompt(loc(), loc("input"), values, desc=desc, multi=multi)
+        if kind == "dropdown":
+            return self.select_dropdown(loc('button[aria-haspopup="listbox"]'), values, desc=desc)
+        if kind == "date":
+            return self.fill_date(field_css, desc, year=values[0] if values else "")
+        if kind == "textarea":
+            return self.act.type(loc("textarea"), str(value), desc=desc)
+        if kind == "checkbox":
+            return self.set_checkbox(loc('input[type="checkbox"]'), bool(value), desc=desc)
+        if kind == "radio":
+            return self.select_radio_by_label(field_css, values, desc=desc)
+        if kind == "text":
+            return self.act.type(loc("input"), str(value), desc=desc)
+        self.log.warning("%s: don't know how to fill this field (%s)", desc, kind)
+        return None
+
+    def select_radio_by_label(self, field_css: str, candidates: Sequence[str], desc: str) -> str | None:
+        radios = self.driver.find_elements(By.CSS_SELECTOR, f'{field_css} input[type="radio"]')
+        labels = []
+        for r in radios:
+            rid = r.get_attribute("id")
+            lab = self.driver.find_elements(By.CSS_SELECTOR, f'label[for="{rid}"]') if rid else []
+            labels.append((lab[0].text if lab else r.get_attribute("value") or "").strip())
+        match = best_match(candidates, labels)
+        if not match:
+            self.log.warning("%s: none of %s in %s", desc, list(candidates), labels)
+            return None
+        idx, label = match
+        rid = radios[idx].get_attribute("id")
+        ok = self.select_radio((By.CSS_SELECTOR, f'[id="{rid}"]'), desc=f"{desc} = {label}")
+        return label if ok else None
+
+    # ============================================================== radio / checkbox
+    def _is_checked(self, locator: Locator) -> bool:
+        el = self.act.find(locator, self.cfg.timeouts.short)
+        return el.is_selected() or (el.get_attribute("aria-checked") == "true")
+
+    def _click_input_or_label(self, locator: Locator, desc: str) -> None:
+        el = self.act.find(locator)
+        input_id = el.get_attribute("id")
+        label = (By.CSS_SELECTOR, f'label[for="{input_id}"]') if input_id else None
+        if label and waits.is_visible(self.driver, label):
+            self.act.click(label, desc=desc)
+        else:
+            self.act.click(locator, desc=desc)
+
+    def select_radio(self, radio: Locator, desc: str) -> bool:
+        if self._is_checked(radio):
+            self.log.info("%s: already selected", desc)
+            return True
+        self._click_input_or_label(radio, desc)
+        ok = bool(waits.poll(lambda: self._is_checked(radio), self.cfg.timeouts.short))
+        (self.log.info if ok else self.log.warning)("%s: %s", desc, "selected" if ok else "did not stay selected")
+        return ok
+
+    def set_checkbox(self, checkbox: Locator, checked: bool, desc: str) -> bool:
+        if self._is_checked(checkbox) == checked:
+            return True
+        self._click_input_or_label(checkbox, desc)
+        ok = bool(waits.poll(lambda: self._is_checked(checkbox) == checked, self.cfg.timeouts.short))
+        if not ok:
+            self.log.warning("%s: checkbox did not change to %s", desc, checked)
+        return ok

@@ -1,0 +1,12 @@
+# Personal data and passwords
+data/
+.env
+
+# Run output
+reports/
+docs/page_dumps/*.html
+
+# Python
+.venv/
+__pycache__/
+*.pyc

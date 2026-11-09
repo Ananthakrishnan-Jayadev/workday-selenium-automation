@@ -1,0 +1,114 @@
+"""Steps shared by every job: loading data, opening the posting, page checks, completing a page."""
+from __future__ import annotations
+
+from behave import given, then, when
+
+from core.logger import get_logger
+from pages.base_page import BasePage
+from pages.job_posting_page import JobPostingPage
+from pages.my_experience_page import MyExperiencePage
+from pages.my_information_page import MyInformationPage
+
+log = get_logger()
+
+# Page title in the feature file → (page name used by BasePage.current_page, page object class)
+PAGES = {
+    "my information": ("my_information", MyInformationPage),
+    "my experience": ("my_experience", MyExperiencePage),
+    # Phase 3: "application questions", "voluntary disclosures", "self identify"
+}
+PAGE_NAMES = {
+    "my information": "my_information",
+    "my experience": "my_experience",
+    "application questions": "application_questions",
+    "voluntary disclosures": "voluntary_disclosures",
+    "self identify": "self_identify",
+    "review": "review",
+}
+
+
+def _page_key(title: str) -> str:
+    key = title.strip().lower()
+    if key not in PAGE_NAMES:
+        raise AssertionError(f"Unknown page {title!r}. Known: {', '.join(PAGE_NAMES)}")
+    return key
+
+
+@given("the job to apply for is loaded")
+def step_job_loaded(context):
+    job = context.job
+    assert job.url.startswith("http"), f"Invalid job URL: {job.url!r}"
+    log.info("job: %s (row %s)", job.company, job.row if job.row else "not in Jobs sheet")
+
+
+@given("the applicant data is loaded from Excel")
+def step_data_loaded(context):
+    data = context.data
+    missing = [k for k in ("FirstName", "LastName") if not data.profile.has(k)]
+    assert not missing, f"Profile sheet is missing: {', '.join(missing)}"
+    context.account = data.find_account(context.job)
+    if context.account is None:
+        context.outcome["notes"] = "no account in the Accounts sheet"
+        raise AssertionError(f"No row in the Accounts sheet for company {context.job.company!r} "
+                             f"or host {context.job.host!r}")
+    log.info("using account %s for %s", context.account.email, context.job.company)
+
+
+@when("I open the job posting")
+def step_open_posting(context):
+    page = JobPostingPage(context.session)
+    page.open(context.job.url)
+    context.session.checkpoint("job_posting")
+
+
+@when("I start the application manually")
+def step_start_manually(context):
+    state = JobPostingPage(context.session).start_apply_manually()
+    if state == "already_applied":
+        context.outcome = {"status": "Skipped", "notes": "already applied"}
+        context.session.checkpoint("already_applied")
+        context.scenario.skip("Already applied to this job")
+        return
+    context.session.checkpoint(f"after_apply_manually_{state}")
+
+
+@when('I complete the "{title}" page')
+def step_complete_page(context, title):
+    key = _page_key(title)
+    if key not in PAGES:
+        raise NotImplementedError(f'Completing the "{title}" page is not built yet')
+    name, page_cls = PAGES[key]
+    s = context.session
+    page = page_cls(s)
+
+    current = page.wait_for_page(lambda p: p not in ("sign_in", "create_account", "job_posting"))
+    if current != name:
+        log.info('"%s" page not shown (on %s), so skipping it', title, current)
+        return
+
+    report = page.fill(context.data)
+    s.checkpoint(f"{name}_filled")
+    if report.failed:
+        if s.pause_for_human(f"{title}: could not fill {', '.join(report.failed)}.\n"
+                             f"See the log for the options that were available."):
+            report.failed.clear()
+
+    result = page.save_and_continue()
+    while not result.ok:
+        errors = "\n  - ".join(result.errors)
+        if not s.pause_for_human(f'{title}: Save and Continue did not go through:\n  - {errors}'):
+            raise AssertionError(f"{title}: Save and Continue blocked: {result.errors}")
+        if page.current_page() != name:   # you clicked Save and Continue yourself
+            break
+        result = page.save_and_continue()
+
+
+@then('I should be on the "{title}" page')
+def step_on_page(context, title):
+    expected = PAGE_NAMES[_page_key(title)]
+    page = BasePage(context.session)
+    actual = page.wait_for_page({expected})
+    context.session.checkpoint(f"on_{expected}")
+    assert actual == expected, (f'Expected the "{title}" page but on {page.current_page()!r} '
+                                f'(step: {page.active_step_name()!r})')
+    context.outcome = {"status": "InProgress", "notes": f"reached {title}"}

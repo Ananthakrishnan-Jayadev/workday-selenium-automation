@@ -1,0 +1,31 @@
+# Any value here can be overridden per run, e.g.:
+#   behave -D browser=firefox -D headless=true -D on_unknown=skip
+
+browser:
+  name: chrome              # chrome | firefox
+  headless: false
+  window_size: 1400,1000
+  binary: null              # browser executable; null = auto-detect
+  driver_path: null         # chromedriver/geckodriver; null = auto (snap driver if present, else Selenium Manager)
+  user_data_dir: null       # persistent profile dir (keeps you signed in between runs); null = fresh profile
+
+timeouts:                   # seconds
+  default: 15               # waiting for an element to appear
+  page_change: 30           # waiting for the next page after a click
+  prompt_results: 6         # waiting for search results in a prompt field
+  short: 3
+
+retries:
+  click: 4
+  type: 2
+
+behaviour:
+  on_unknown: pause         # pause | skip | fail: what to do when something can't be filled
+  keep_browser_open_on_failure: true
+  pause_at_end: true        # wait for Enter before closing the browser at the end of a run
+  slow_mo_ms: 0             # extra delay after each click/type, for watching or debugging
+  dump_pages: true          # save each page's HTML into the run folder
+
+paths:
+  workbook: data/applicant_data.xlsx
+  reports: reports
