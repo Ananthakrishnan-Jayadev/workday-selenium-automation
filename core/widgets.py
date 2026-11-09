@@ -182,12 +182,12 @@ class Widgets:
                 labels.append(label)
         return opts, labels
 
-    def _wait_for_new_results(self, before: list[str], timeout: float) -> bool:
-        """Wait until the option list differs from `before` AND has stopped changing.
+    def _wait_for_relevant_results(self, term: str, timeout: float) -> bool:
+        """Wait until the list shows an option matching `term` and has stopped changing.
 
-        Workday shows a list (the full list, or 'No Items.') the moment the field is focused, then
-        replaces it with the search results a little later. Reading options straight away picks up
-        that stale list, which is what made skills and field of study fail."""
+        Only a list that contains a match counts. Workday often shows an unrelated list first
+        ('No Items.', or the full A-Z list for Field of Study) and replaces it with the real
+        results later; accepting any list that merely appeared is what broke Field of Study."""
         end = time.monotonic() + timeout
         time.sleep(0.4)
         last, stable = None, 0
@@ -195,7 +195,7 @@ class Widgets:
             if self._no_matches():
                 return False
             _, labels = self._result_options()
-            if labels and labels != before:
+            if labels and best_match([term], labels) is not None:
                 stable = stable + 1 if labels == last else 0
                 if stable >= 2:  # unchanged across 2 polls (~0.6s)
                     return True
@@ -249,17 +249,19 @@ class Widgets:
         for term in terms:
             box = self.act.focus(input_, desc=f"{desc} input")
             self.act.clear(box)
-            self.act.settle(0.3)
-            _, before = self._result_options()
             box.send_keys(term)
-            # Some lists filter as you type; others (skills, "how did you hear") search on Enter.
-            found = self._wait_for_new_results(before, 1.5)
+            # Some lists filter as you type; others (skills, field of study, "how did you hear")
+            # only search on Enter. Enter is pressed only if typing alone didn't show a match,
+            # because on a filtered list Enter can pick the highlighted option.
+            found = self._wait_for_relevant_results(term, 1.5)
             if not found and not self._no_matches():
                 box.send_keys(Keys.ENTER)
-                found = self._wait_for_new_results(before, self.cfg.timeouts.prompt_results)
+                found = self._wait_for_relevant_results(term, self.cfg.timeouts.prompt_results)
             if found:
                 break
-            self.log.debug("%s: no results for %r", desc, term)
+            _, seen = self._result_options()
+            self.log.info("%s: no option matching %r%s", desc, term,
+                          " (No matches found)" if self._no_matches() else f". List showed: {seen[:15]}")
             self.act.clear(box)
         if not found:
             return None
