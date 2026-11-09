@@ -52,6 +52,10 @@ Detailed plan: [PHASE1.md](PHASE1.md)
   languages (per-type proficiency) → skills (multiselect) → LinkedIn/websites.
 - Step: `I complete the "My Experience" page`.
 
+**Live notes:** Field of Study takes the closest option before a fallback ("Artificial Intelligence"
+→ "Artificial Intelligence and Robotics"); skills need Workday's exact name (CIBC has no plain "SQL"
+in search results; a missing skill is skipped with a warning).
+
 **Acceptance**
 - 2+ work entries, 1+ education entry, 1 language and 5 skills filled. Save and Continue moves on
   with no validation errors.
@@ -61,7 +65,9 @@ Detailed plan: [PHASE1.md](PHASE1.md)
 
 ## Phase 3: Questions, disclosures, review stop, batch
 
-**Status (2026-11-09):** Application Questions built + mock-tested; disclosures, review stop, batch next.
+**Status (2026-11-09):**
+- ✅ Application Questions: live on CIBC (11 questions answered from the Questions sheet).
+- ⏭ Next: Voluntary Disclosures (CIBC run reaches it), Review stop, `run.py` batch + Excel status write-back.
 
 **Goal:** complete end-to-end runs to Review, and batch mode.
 

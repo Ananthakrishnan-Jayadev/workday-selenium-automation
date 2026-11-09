@@ -37,60 +37,35 @@
 
 ```
 workday-selenium/
-├── README.md
-├── behave.ini                      # --no-capture so pause prompts show; format, paths
-├── requirements.txt
-├── config/
-│   └── config.yaml                 # browser, timeouts, retries, paths, behaviour flags
-├── .env.example                    # optional ENV: passwords
-├── data/                           # git-ignored
-│   └── applicant_data.xlsx
-├── docs/
-│   ├── PROJECT.md  DESIGN.md  PHASES.md  LOCATORS.md
-│   └── page_dumps/                 # saved HTML of each Workday page (git-ignored)
+├── README.md  behave.ini  requirements.txt  .env.example  .gitignore
+├── config/config.yaml              # browser, timeouts, retries, behaviour, paths
+├── data/                           # git-ignored: applicant_data.xlsx, resume, backups
+├── docs/                           # PROJECT, DESIGN, PHASES, PHASE1, LOCATORS, page_dumps/
 ├── features/
 │   ├── apply_job.feature
-│   ├── environment.py              # hooks
+│   ├── environment.py              # hooks: config, Excel, driver, screenshots, result.json
 │   └── steps/
-│       ├── common_steps.py         # open URL, save and continue, page assertions
-│       ├── auth_steps.py
-│       ├── my_information_steps.py
-│       ├── my_experience_steps.py
-│       ├── questions_steps.py
-│       ├── disclosures_steps.py
-│       └── review_steps.py
+│       ├── common_steps.py         # job/data, open posting, Apply Manually, complete "<page>", on "<page>"
+│       └── auth_steps.py           # sign in
 ├── pages/
-│   ├── base_page.py                # page detection, save_and_continue, error banner check
-│   ├── job_posting_page.py         # Apply → Apply Manually popup
-│   ├── sign_in_page.py
+│   ├── base_page.py                # page detection, error-page recovery, Save and Continue, errors
+│   ├── job_posting_page.py         # Apply → Apply Manually
+│   ├── auth_page.py                # Create Account / Sign In form (one form, two modes)
 │   ├── my_information_page.py
-│   ├── my_experience_page.py
-│   ├── application_questions_page.py
-│   ├── voluntary_disclosures_page.py
-│   ├── self_identify_page.py
-│   └── review_page.py
-├── locators/
-│   ├── common.py                   # page markers, nav buttons, listbox/option, popups, errors
-│   ├── job_posting.py  sign_in.py  my_information.py  my_experience.py
-│   ├── questions.py  disclosures.py  self_identify.py  review.py
+│   ├── my_experience_page.py       # resume, repeatable entries, languages, skills, websites
+│   └── questions_page.py           # any questionnaire page, answered from the Questions sheet
+├── locators/                       # (By, value) only: common, job_posting, auth, my_information,
+│                                   # my_experience, questions
 ├── core/
-│   ├── driver.py                   # DriverFactory (chrome/firefox, options)
-│   ├── waits.py
-│   ├── actions.py                  # safe_click, safe_type, scroll, retry decorator
-│   ├── widgets.py                  # Workday controls
-│   ├── text.py                     # normalize(), best_match()
-│   ├── excel_reader.py             # read workbook → models
-│   ├── excel_writer.py             # write Status back to Jobs sheet
-│   ├── models.py
-│   ├── answers.py                  # question → answer rule engine
-│   ├── human.py                    # pause_for_human(reason)
-│   ├── config.py  logger.py
-├── tools/
-│   ├── make_template.py            # generates an empty applicant_data.xlsx with all sheets
-│   └── dump_page.py                # saves page HTML + screenshot for locator work
-├── run.py                          # batch runner over the Jobs sheet
-└── reports/                        # git-ignored: logs/, screenshots/, page_dumps/, run JSON
+│   ├── actions.py                  # click / type / focus with retries, popup closing, honeypot guard
+│   ├── widgets.py                  # dropdown, prompt, date, upload, radio, checkbox(es), auto-detect
+│   ├── text.py                     # normalize, best_match, strong_match, contains_words, closest_by_words
+│   ├── answers.py                  # Questions-sheet rules
+│   ├── excel_reader.py  models.py  session.py  reporter.py  waits.py  driver.py  config.py  logger.py
+├── tools/make_template.py  tools/dump_page.py
+└── reports/                        # git-ignored run output
 ```
+`run.py` (batch) arrives with Phase 3.
 
 ## 3. Execution flow
 
@@ -105,11 +80,9 @@ behave -D url="https://cibc.wd3.myworkdayjobs.com/.../job/..."
 job can't take down the rest. After each job, `run.py` writes `Status`, `LastRun` and `Notes` back
 to the Jobs sheet.
 
-### 3.3 Feature file (shape)
+### 3.3 Feature file (current)
 ```gherkin
-Feature: Apply to a Workday job
-
-  Scenario: Fill a Workday application up to Review
+  Scenario: Fill a Workday application
     Given the job to apply for is loaded
     And the applicant data is loaded from Excel
     When I open the job posting
@@ -117,17 +90,13 @@ Feature: Apply to a Workday job
     And I sign in with the account for this company
     And I complete the "My Information" page
     And I complete the "My Experience" page
-    And I complete the "Application Questions" pages
-    And I complete the "Voluntary Disclosures" page
-    And I complete the "Self Identify" page
-    Then I should be on the "Review" page
-    And I wait for the user to review and submit
+    And I complete the "Application Questions" page
+    Then I should be on the "Voluntary Disclosures" page
 ```
-
-**Tenant tolerance.** Each "complete the X page" step first **detects the current page** by its
-marker. If the tenant does not have that page, the step logs "skipped" and passes. The questions
-step loops while a questions page is showing, which handles tenants that have both Primary and
-Secondary question pages. Any page the script doesn't recognise triggers a pause for you.
+`I complete the "<page>" page` is one generic step: it waits for the page's own form marker
+(refreshing on Workday's error screen), fills it, pauses for you if anything failed, clicks Save and
+Continue, and repeats if the same page continues (Primary → Secondary questions). A page the tenant
+doesn't have is skipped.
 
 ### 3.4 Hooks (`environment.py`)
 | Hook | Does |
@@ -170,58 +139,76 @@ close button, toast) if visible. It never clicks anything that could submit.
 5. If `commit`, press Tab (blur) so Workday commits the value. Your extension found that values
    which were never blurred get lost on Save and Continue.
 
-### 4.3 Dropdowns: `select_dropdown(container_locator, candidates)`
+### 4.3 Matching rules (`core/text.py`)
+All comparisons use `normalize()` (lowercase; apostrophes, dashes, slashes and extra spaces ignored).
+| Function | Meaning | Used for |
+|---|---|---|
+| `best_match` | exact > starts-with > contains | picking an option from a list |
+| `strong_match` | equal, or equal plus a bracketed note (`Python (Programming Language)`) | skills; "already set" for multi-select |
+| `contains_words` | whole-word containment (`Fluent` in `5 - Fluent`, not `Male` in `Female`) | "already set" for dropdowns |
+| `closest_by_words` | most shared distinctive whole words; generic words (science, engineering, ...) don't count alone | Field of Study (`loose`) |
+
+### 4.4 Dropdowns: `select_dropdown(button, candidates)`
 Workday single-selects are `button[aria-haspopup="listbox"]`, not `<select>`.
-1. `safe_click` the button, then wait for a **visible** `[role="listbox"]`. Workday appends popups to
-   the end of the body, so the code uses the *last visible* listbox.
-2. Collect `[role="option"]` labels (`data-automation-label` or text).
-3. Pick the best match with `best_match(candidates, options)`: exact → starts-with → contains,
-   case/punctuation-insensitive, trying each fallback candidate in order (e.g. a list of degree names).
-4. Scroll the option into view inside the listbox and click it.
-5. Verify the button text now shows the choice. If it doesn't, try once more using the keyboard
-   (type the first letters, then Enter).
-6. If nothing matches, press Escape to close, log all available options to help fill in Excel,
-   and return `False`. The caller decides whether to pause.
+1. If the button already shows a matching value (starts-with or whole words), skip it, because
+   re-selecting can re-render dependent fields.
+2. Click; wait for the **last visible** `[role=listbox]` (popups are appended to `<body>`; the
+   `selectedItemList` of prompt fields also has role=listbox and is excluded).
+3. Pick with `best_match` over the fallbacks in order. Long lists: type to jump if not rendered.
+4. Verify the button text. If the list won't open on click, try Enter / Arrow Down on the button.
+5. No match → Escape, log every option, return None (the page decides whether to pause).
 
-### 4.4 Prompt / multiselect: `select_prompt(container_locator, candidates)`
-Used for "How did you hear", Skills, Field of Study, School (some tenants), and multi-select
-disclosure questions.
-1. Click the `searchBox` or `multiselectInputContainer input`, type the candidate, press **Enter**.
-   On Workday, typing alone doesn't run the search.
-2. Wait until `promptOption` results appear **or** `promptTitle` says "No matches found".
-3. Pick the best match, excluding options already in `selectedItemList`, and click its
-   checkbox (`checkboxPanel`) or the option itself.
-4. Verify it shows up as a selected pill. Some prompts are hierarchical (e.g. "Job Board → LinkedIn"):
-   if the clicked option opens a sub-list, repeat the match on the sub-list.
-5. If there are no matches, clear the box and try the next candidate.
+### 4.5 Prompt / multiselect: `select_prompt(field, input, candidates, multi, loose)`
+Used for How did you hear, phone code, Field of Study, Skills.
+- **Already set?** Single fields: matches the *first* candidate (a fallback in the field is
+  replaced if something better is found). Multi (skills): `strong_match` only; near-misses left
+  by earlier runs are removed once the right value is picked.
+- **Search** (`_run_search`): focus the input (via JavaScript if covered by the selected pills),
+  type the term, wait ~1.5s; press **Enter** only if typing alone produced nothing (on lists that
+  filter as you type, Enter picks the highlighted option). Each poll checks, in order:
+  1. the **field**: did Workday select something by itself? (Enter with a single match selects it
+     and shows no list) → accept if it matches, else remove it;
+  2. the **list**: only a list that contains a match for the term counts (Workday first shows
+     'No Items.' or the full A-Z list), and it must be unchanged across two polls;
+  3. "No matches found" only if it stays ~2.5s (it flashes up before the real results).
+- **Pick**: `best_match`; if only a partial match, wait 1.2s for the exact option to load.
+  Multi: options already selected are never clicked again (Workday rejects duplicate skills), and
+  with no exact option nothing is picked.
+- **Hierarchy**: `Category > Value`. If clicking an option opens a sub-list (radio rows), go down.
+- **Loose** (Field of Study): if a candidate isn't listed, search its distinctive words one by one
+  and take the closest option before moving to the next fallback.
+- Every poll is traced at DEBUG; a search that finds nothing saves a screenshot + HTML.
 
-### 4.5 Dates: `fill_date(container, month, year, day=None)`
-Inputs are `dateSectionMonth-input`, `dateSectionDay-input` and `dateSectionYear-input`. The code
-types month → (day) → year without blurring between them, blurs once at the end, then re-reads
-the month, because Workday sometimes clears it when the year is entered. If it was cleared, the
-month is typed again. Month names in Excel ("January") are converted to "01".
+### 4.6 Dates: `fill_date(field_css, month, year, day)`
+Each part is a `role=spinbutton` input covered by a `dateSection<Part>-display` div. Click the display
+div (focuses the input), Backspace over the old digits, type the new ones, Tab out, then verify each
+part from `aria-valuetext` and retype any that didn't take. Month names are converted to `01`–`12`.
 
-### 4.6 Repeatable sections (Work Experience, Education, Languages, Certifications)
-Workday numbers entry containers `workExperience-1`, `education-2`, and so on. For entry *i*:
-click the section's `Add` / `Add Another` button until container *i* exists, then look up
-fields **inside that container only**. If the tenant doesn't number its containers, the fallback
-is the last occurrence of each `formField-*` (as in the extension's `getEntryScope`).
-**Pre-filled entries:** if containers already exist (for example from a resume parse), fill them
-in place rather than adding duplicates.
+### 4.7 Repeatable sections (Work Experience, Education, Languages, Websites, Certifications)
+Sections are found by their `<h4>` heading. Entries are found **page-wide** by their first field
+(`formField-jobTitle`, `formField-schoolName`, `button[name=language]`); each entry's container is
+the largest ancestor holding exactly one such field, tagged at runtime as `data-wdauto="work-1"`, so
+its fields are addressed with plain CSS. Add is clicked until entry *i* exists; existing entries are
+filled in place. "I currently work here" is set before the dates (it removes the end date).
 
-### 4.7 Waiting for Workday
-- Page change: after Save and Continue, wait until the old page marker is **stale** and a new
-  `applyFlow*Page` marker is present.
-- Lazy sections: wait for the section container before looking up its fields.
-- Loading: wait for spinners/masks to disappear (locator to be confirmed from a page dump).
-- After Save and Continue, check for an error banner or field errors. If any, screenshot, log the
-  messages and pause for you to fix them on screen, then continue.
+### 4.8 Questionnaire pages (`pages/questions_page.py`)
+Questions are the top-level `formField-<hex id>` containers (ids differ per company, so they're
+matched by **text**). For each: read the legend text and required flag, find the Questions rule,
+auto-detect the control (`widgets.detect`: date / prompt / dropdown / textarea / radio / checkbox /
+text) and fill it (`widgets.fill_auto`). Already-answered questions without a rule are left alone;
+required unanswered ones are reported with their dropdown options.
 
-### 4.8 Pause for human (`core/human.py`)
-`pause_for_human(reason)` takes a screenshot, prints the reason and waits for Enter in the terminal.
-It's used for: unknown required question, no dropdown match, validation error after save, CAPTCHA
-or verification screen detected, unexpected page. Config `on_unknown: pause | skip | fail`
-controls whether it pauses (default `pause`).
+### 4.9 Waiting, errors and recovery
+- `current_page()` returns `error` for Workday's "Something went wrong" screen, otherwise the page
+  marker (`applyFlow*Page`), sign-in/create-account form, or progress-bar step name.
+- After sign-in and before filling any page, the page's own form marker is awaited; on the error
+  screen, or if the form never loads, the page is refreshed (up to twice).
+- Save and Continue waits for the page (or the exact marker, for Primary → Secondary) to change;
+  if it doesn't, the per-field `inputAlert` messages (else the `errorHeading` summary) are reported.
+
+### 4.10 Pause for human (`Session.pause_for_human`)
+Screenshot + HTML, the reason in the terminal, wait for Enter. `on_unknown: skip` logs and carries
+on; `fail` (or no terminal) raises.
 
 ## 5. Excel workbook (`data/applicant_data.xlsx`)
 
@@ -286,7 +273,9 @@ found, the job is marked `Failed: no account` (V1 does not create accounts).
 - **Answer** must be the option label as Workday shows it (best-match is tolerant of case and
   punctuation). For checkbox groups, `;` selects several options. For text inputs, the value is typed.
 
-This replaces the hard-coded TD/EY rules in the extension.
+This replaces the hard-coded TD/EY rules in the extension. CIBC puts its diversity questions on the
+Application Questions page, so those rows leave **Page** blank. A blank Answer means "ask me":
+the run pauses on that required question and lists its options.
 
 ## 6. Configuration (`config/config.yaml`)
 ```yaml

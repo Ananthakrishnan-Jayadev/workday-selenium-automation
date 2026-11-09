@@ -16,7 +16,7 @@ a button with no aid).
 | My Experience | `applyFlowMyExpPage` | ✅ EXT |
 | Application Questions | `applyFlowPrimaryQuestionsPage`, `applyFlowSecondaryQuestionsPage` | ✅ / ⚠️ |
 | Voluntary Disclosures | `applyFlowVoluntaryDisclosuresPage` | ✅ EXT |
-| Self Identify | `selfIdentificationPage` (?) | ⚠️ AGW |
+| Self Identify | `selfIdentificationPage` (?) | ⚠️ AGW (CIBC has no such step) |
 | Review | `applyFlowReviewPage` / `summaryView` / `reviewPanel` | ⚠️ AGW |
 
 ## Navigation and common
@@ -53,6 +53,17 @@ a button with no aid).
 step's name as a fallback. Steps on CIBC: *Create Account/Sign In → My Information → My Experience →
 Application Questions → Voluntary Disclosures → Review*. Once signed in, the account step disappears,
 so the numbering becomes "1 of 5". CIBC has **no separate Self Identify step**.
+
+## Workday error screen (CIBC, right after sign-in)
+| Element | Locator | Status |
+|---|---|---|
+| "Something went wrong" | no automation id: `h1` "Something went wrong" + "Please refresh the page and then try again." + "Error Code: VPS\|…" inside the normal apply-flow shell (the progress bar still shows "My Information") | ✅ RUN |
+
+## Prompt search behaviour (verified on CIBC)
+- Field of Study shows the full A–Z list a moment after focus; the real results come after Enter.
+- "No matches found" can show before the search has run.
+- Enter with a single match **selects it immediately** and shows no list.
+- Search can return near-misses only (`SQL` → `SQL Assistant`, `SAS SQL`).
 
 ## Job posting → start
 | Element | Locator | Status |
@@ -129,14 +140,14 @@ Notes:
 | Entry container | found from the entry's first field (`formField-jobTitle`, `formField-schoolName`, `button[name=language]`); tagged `data-wdauto="work-1"` at runtime | logic tested on mock |
 | Work fields | `formField-jobTitle`, `-companyName`, `-location`, `-currentlyWorkHere`, `-startDate`, `-endDate`, `-roleDescription` | ✅ EXT |
 | Education fields | `formField-schoolName` (alias school/university/institution), `-degree` (dropdown), `-fieldOfStudy` (prompt), `-gradeAverage`, `-firstYearAttended`, `-lastYearAttended` | ✅ EXT |
-| Language | `button[aria-haspopup=listbox][name="language"]`; proficiency = other listbox buttons in the entry, aria-label starts with the type | ✅ EXT |
-| Skills | `formField-skills` → `input#skills--skills` (prompt, multi) | ✅ RUN |
+| Language | `button[aria-haspopup=listbox][name="language"]` (`id=language-<n>--language`); proficiency = other listbox buttons in the entry, `aria-label` = "<Type> <value> Required". CIBC types: Comprehension, Overall, Reading, Speaking, Writing; values like `5 - Fluent` | ✅ RUN |
+| Skills | `formField-skills` → `input#skills--skills` (prompt, multi). Shows "No Items." until Enter; once skills are selected the `selectedItemList` covers the input (focus it via JS). Workday rejects duplicates ("You cannot enter duplicate skills") | ✅ RUN |
 | Resume input | `input[type=file][data-automation-id="file-upload-input-ref"]` next to `select-files` button, "Upload a file (5MB max) *" (required) | ✅ RUN |
 | Uploaded file row | ❓ (detected by the file name appearing in the Resume/CV section) | ❓ |
 | Websites entry field | `formField-url`? | ❓ |
 | LinkedIn | `input[name="linkedInAccount"]` | ✅ RUN |
 | Back button | `pageFooterBackButton` | ✅ RUN |
-| Date parts | `dateSectionMonth-input`, `dateSectionYear-input` inside `formField-*Date` | ✅ EXT |
+| Date parts | `role=spinbutton` inputs `dateSectionMonth-input` / `dateSectionYear-input`, each **covered** by a `dateSection<Part>-display` div (click that); value in `aria-valuetext`; help text "current value is MM/2026"; wrapper `dateInputWrapper` | ✅ RUN |
 
 ## Application Questions (CIBC run 2026-11-09 ✅)
 | Element | Locator | Status |
