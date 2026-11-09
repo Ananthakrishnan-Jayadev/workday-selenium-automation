@@ -473,13 +473,77 @@ class Widgets:
         if kind == "textarea":
             return self.act.type(loc("textarea"), str(value), desc=desc)
         if kind == "checkbox":
-            return self.set_checkbox(loc('input[type="checkbox"]'), bool(value), desc=desc)
+            boxes = self.driver.find_elements(By.CSS_SELECTOR, f'{field_css} input[type="checkbox"]')
+            if len(boxes) > 1 or (values and normalize(values[0]) not in ("yes", "true", "no", "false")):
+                return self.select_checkboxes_by_label(field_css, values, desc=desc)
+            on = value if isinstance(value, bool) else normalize(values[0] if values else "") in ("yes", "true")
+            return self.set_checkbox(loc('input[type="checkbox"]'), on, desc=desc)
         if kind == "radio":
             return self.select_radio_by_label(field_css, values, desc=desc)
         if kind == "text":
             return self.act.type(loc("input"), str(value), desc=desc)
         self.log.warning("%s: don't know how to fill this field (%s)", desc, kind)
         return None
+
+    def _labelled_inputs(self, field_css: str, kind: str) -> list[tuple[str, str]]:
+        """[(input id, label text)] for the radio buttons / checkboxes in a field."""
+        out = []
+        for inp in self.driver.find_elements(By.CSS_SELECTOR, f'{field_css} input[type="{kind}"]'):
+            iid = inp.get_attribute("id")
+            lab = self.driver.find_elements(By.CSS_SELECTOR, f'label[for="{iid}"]') if iid else []
+            out.append((iid, (lab[0].text if lab else inp.get_attribute("value") or "").strip()))
+        return out
+
+    def select_checkboxes_by_label(self, field_css: str, wanted: Sequence[str], desc: str) -> str | None:
+        """Tick every checkbox whose label matches one of `wanted` (others are left as they are)."""
+        boxes = self._labelled_inputs(field_css, "checkbox")
+        labels = [lab for _, lab in boxes]
+        ticked = []
+        for w in wanted:
+            m = best_match([w], labels)
+            if not m:
+                self.log.warning("%s: no checkbox matching %r in %s", desc, w, labels)
+                return None
+            iid = boxes[m[0]][0]
+            if self.set_checkbox((By.CSS_SELECTOR, f'[id="{iid}"]'), True, desc=f"{desc}: {m[1]}"):
+                ticked.append(m[1])
+        self.log.info("%s: ticked %s", desc, ticked)
+        return "; ".join(ticked) if ticked else None
+
+    def current_answer(self, field_css: str) -> str:
+        """What the field currently holds ('' if unanswered), whatever kind of control it is."""
+        js = """
+        const f = document.querySelector(arguments[0]);
+        if (!f) return '';
+        const btn = f.querySelector('button[aria-haspopup="listbox"]');
+        if (btn) { const t = btn.textContent.trim(); return /^select one$/i.test(t) ? '' : t; }
+        const aria = f.querySelector('[data-automation-id="promptAriaInstruction"]');
+        if (aria) { const t = aria.textContent.trim(); return t.includes(',') ? t.split(',').slice(1).join(',').trim() : ''; }
+        const checked = [...f.querySelectorAll('input[type="radio"], input[type="checkbox"]')].filter(i => i.checked);
+        if (checked.length) return checked.map(i => {
+            const l = i.id && document.querySelector('label[for="' + CSS.escape(i.id) + '"]');
+            return l ? l.textContent.trim() : (i.value || 'checked'); }).join('; ');
+        const date = f.querySelector('[data-automation-id^="dateSection"][data-automation-id$="-input"]');
+        if (date) return [...f.querySelectorAll('[data-automation-id^="dateSection"][data-automation-id$="-input"]')]
+            .map(i => i.value).filter(Boolean).join('/');
+        const t = f.querySelector('textarea, input[type="text"], input:not([type])');
+        return t ? t.value.trim() : '';
+        """
+        try:
+            return (self.driver.execute_script(js, field_css) or "").strip()
+        except WebDriverException:
+            return ""
+
+    def dropdown_options(self, button: Locator) -> list[str]:
+        """Open a dropdown, read its options, close it (used to tell you what an unknown question offers)."""
+        try:
+            self.act.click(button, desc="peek dropdown")
+            listbox = self._open_listbox()
+            labels = self._listbox_options(listbox)[1] if listbox else []
+        except Exception:  # noqa: BLE001 - purely informational
+            labels = []
+        self.act.close_popups()
+        return [l for l in labels if l and normalize(l) != "select one"]
 
     def select_radio_by_label(self, field_css: str, candidates: Sequence[str], desc: str) -> str | None:
         radios = self.driver.find_elements(By.CSS_SELECTOR, f'{field_css} input[type="radio"]')

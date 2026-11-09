@@ -66,6 +66,14 @@ class BasePage:
             return None
         return None
 
+    def current_marker(self) -> str | None:
+        """The exact page marker present (distinguishes Primary vs Secondary questions pages)."""
+        for markers in C.PAGE_MARKERS.values():
+            for m in markers:
+                if waits.is_present(self.driver, m):
+                    return m[1]
+        return None
+
     def active_step_name(self) -> str:
         els = self.driver.find_elements(*C.ACTIVE_STEP_NAME)
         return (els[0].text or "").strip() if els else ""
@@ -151,13 +159,15 @@ class BasePage:
     def save_and_continue(self) -> SaveResult:
         """Click Save and Continue and wait for the page to change. Returns errors if it doesn't."""
         before = self.current_page()
+        before_marker = self.current_marker()
         loc, _ = waits.first_present(self.driver, C.NEXT_BUTTONS, self.cfg.timeouts.default, visible_only=True)
         self.act.click(loc, desc="Save and Continue")
 
         start = time.monotonic()
         while time.monotonic() - start < self.cfg.timeouts.page_change:
             page = self.current_page()
-            if page and page != before:
+            marker = self.current_marker()
+            if page and page != "error" and (page != before or (marker and marker != before_marker)):
                 self.log.info("moved from %s to %s", before, page)
                 return SaveResult(ok=True, page=page)
             if time.monotonic() - start > 2.0:

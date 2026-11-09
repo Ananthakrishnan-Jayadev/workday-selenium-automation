@@ -39,7 +39,7 @@ Detailed plan: [PHASE1.md](PHASE1.md)
 
 ## Phase 2: My Experience
 
-**Status (2026-11-09):** built; mock-tested; first live run pending.
+**Status:** ✅ done (live run 2026-11-09).
 
 **Goal:** the hardest page, filled completely.
 
@@ -60,6 +60,8 @@ Detailed plan: [PHASE1.md](PHASE1.md)
 ---
 
 ## Phase 3: Questions, disclosures, review stop, batch
+
+**Status (2026-11-09):** Application Questions built + mock-tested; disclosures, review stop, batch next.
 
 **Goal:** complete end-to-end runs to Review, and batch mode.
 

@@ -257,7 +257,7 @@ class MyExperiencePage(BasePage):
             self._do(r, f"Website {i}", url, lambda: self.act.type((By_CSS, f"{css} input"), url, desc=f"Website {i}"))
 
     # ================================================================== page
-    def fill(self, data: AppData) -> FillReport:
+    def fill(self, data: AppData, job=None) -> FillReport:
         if not self.is_displayed(self.cfg.timeouts.page_change):
             raise AssertionError("My Experience page is not displayed")
         self.act.settle(0.5)

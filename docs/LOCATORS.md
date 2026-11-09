@@ -138,12 +138,18 @@ Notes:
 | Back button | `pageFooterBackButton` | ✅ RUN |
 | Date parts | `dateSectionMonth-input`, `dateSectionYear-input` inside `formField-*Date` | ✅ EXT |
 
-## Application Questions
+## Application Questions (CIBC run 2026-11-09 ✅)
 | Element | Locator | Status |
 |---|---|---|
-| Question block | `fieldset` (fallback `questionItem`, `questionnaireQuestion`) | ✅ EXT |
-| Question text | `legend`, `[data-automation-id="richText"]`, `questionTitle`, `label` | ✅ EXT |
-| Controls in block | dropdown button, radio, checkbox, `input[type=text]`, `textarea` | ✅ EXT |
+| Page marker | `applyFlowPrimaryQuestionsPage` (also `applyFlowSecondaryQuestionsPage` on some tenants) | ✅ RUN |
+| Question container | top-level `[data-automation-id="formField-<32 hex>"]`: ids differ per company/question, so questions are matched by **text** | ✅ RUN |
+| Question text | `fieldset > legend` (a `richText` div); trailing `*` = required | ✅ RUN |
+| Dropdown answer | `button[aria-haspopup="listbox"]` (text "Select One" when unanswered) | ✅ RUN |
+| Checkbox group | `fieldset[data-automation-id="<id>-CheckboxGroup"]` → `input[type=checkbox]` + `label[for]` | ✅ RUN |
+
+CIBC puts its diversity questions (gender, LGBTQ+, visible minority, race, disability, Indigenous,
+newcomer, military) on this page, not on Voluntary Disclosures, so Questions-sheet rows for them leave
+**Page** blank.
 
 ## Voluntary Disclosures
 | Field | Locator | Status |

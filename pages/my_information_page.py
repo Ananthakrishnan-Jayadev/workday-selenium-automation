@@ -49,7 +49,7 @@ class MyInformationPage(BasePage):
                    lambda: self.act.type(locator, value, desc=label, compare=compare))
 
     # ------------------------------------------------------------------ fill
-    def fill(self, data: AppData) -> FillReport:
+    def fill(self, data: AppData, job=None) -> FillReport:
         p = data.profile
         if not self.is_displayed(self.cfg.timeouts.page_change):
             raise AssertionError("My Information page is not displayed")

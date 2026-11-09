@@ -113,6 +113,7 @@ class AppData:
     languages: list[LanguageEntry] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     certifications: list[Certification] = field(default_factory=list)
+    questions: list = field(default_factory=list)  # core.answers.QuestionRule
 
     def find_account(self, job: Job) -> Account | None:
         """Match on company name first, then on the URL host (TenantHost column)."""

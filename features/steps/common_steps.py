@@ -8,6 +8,7 @@ from pages.base_page import BasePage
 from pages.job_posting_page import JobPostingPage
 from pages.my_experience_page import MyExperiencePage
 from pages.my_information_page import MyInformationPage
+from pages.questions_page import ApplicationQuestionsPage
 
 log = get_logger()
 
@@ -15,7 +16,8 @@ log = get_logger()
 PAGES = {
     "my information": ("my_information", MyInformationPage),
     "my experience": ("my_experience", MyExperiencePage),
-    # Phase 3: "application questions", "voluntary disclosures", "self identify"
+    "application questions": ("application_questions", ApplicationQuestionsPage),
+    # Next: "voluntary disclosures", "self identify"
 }
 PAGE_NAMES = {
     "my information": "my_information",
@@ -92,21 +94,31 @@ def step_complete_page(context, title):
     if not page.wait_for_form(name):
         raise AssertionError(f'"{title}" form never loaded (refreshed twice)')
 
-    report = page.fill(context.data)
-    s.checkpoint(f"{name}_filled")
-    if report.failed:
-        if s.pause_for_human(f"{title}: could not fill {', '.join(report.failed)}.\n"
-                             f"See the log for the options that were available."):
-            report.failed.clear()
+    # A page can repeat (e.g. Primary then Secondary application questions), so loop while we're on it.
+    for _round in range(3):
+        report = page.fill(context.data, job=context.job)
+        s.checkpoint(f"{name}_filled")
+        if report.failed:
+            unanswered = getattr(page, "unanswered", [])
+            detail = ("\nUnanswered required questions (add rows to the Questions sheet for next time):\n  - "
+                      + "\n  - ".join(unanswered)) if unanswered else ""
+            if s.pause_for_human(f"{title}: could not fill {len(report.failed)} field(s):\n  - "
+                                 + "\n  - ".join(report.failed[:15]) + detail
+                                 + "\nSee the log for the options that were available."):
+                report.failed.clear()
 
-    result = page.save_and_continue()
-    while not result.ok:
-        errors = "\n  - ".join(result.errors)
-        if not s.pause_for_human(f'{title}: Save and Continue did not go through:\n  - {errors}'):
-            raise AssertionError(f"{title}: Save and Continue blocked: {result.errors}")
-        if page.current_page() != name:   # you clicked Save and Continue yourself
-            break
         result = page.save_and_continue()
+        while not result.ok:
+            errors = "\n  - ".join(result.errors)
+            if not s.pause_for_human(f'{title}: Save and Continue did not go through:\n  - {errors}'):
+                raise AssertionError(f"{title}: Save and Continue blocked: {result.errors}")
+            if page.current_page() != name:   # you clicked Save and Continue yourself
+                break
+            result = page.save_and_continue()
+
+        if page.current_page() != name:
+            break
+        log.info('"%s" continues on another page, filling that too', title)
 
 
 @then('I should be on the "{title}" page')

@@ -11,6 +11,7 @@ from openpyxl import load_workbook as _open
 from core import PROJECT_ROOT
 from core.models import (Account, AppData, Certification, EducationEntry, Job, LanguageEntry, Profile,
                          WorkEntry)
+from core.answers import QuestionRule
 from core.text import normalize, split_list
 
 
@@ -138,6 +139,13 @@ def load_app_data(path: Path) -> AppData:
                     data.certifications.append(Certification(
                         name=_get(r, "Name"), number=_get(r, "Number"),
                         expiry_month=_get(r, "ExpiryMonth"), expiry_year=_get(r, "ExpiryYear")))
+
+        if "questions" in sheets:
+            for row, r in _rows(sheets["questions"]):
+                if _get(r, "Keywords"):
+                    data.questions.append(QuestionRule(
+                        keywords=_get(r, "Keywords"), answer=_get(r, "Answer"),
+                        company=_get(r, "Company"), page=_get(r, "Page"), row=row))
 
         return data
     finally:

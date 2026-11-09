@@ -12,4 +12,5 @@ Feature: Apply to a Workday job
     And I sign in with the account for this company
     And I complete the "My Information" page
     And I complete the "My Experience" page
-    Then I should be on the "Application Questions" page
+    And I complete the "Application Questions" page
+    Then I should be on the "Voluntary Disclosures" page
