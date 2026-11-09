@@ -25,7 +25,8 @@ from selenium.webdriver.remote.webelement import WebElement
 from core import waits
 from core.actions import Actions
 from core.logger import get_logger
-from core.text import best_match, closest_by_words, key_words, match_score, normalize, split_list, word_overlap
+from core.text import (best_match, closest_by_words, key_words, match_score, normalize, split_list,
+                       strong_match, word_overlap)
 from core.waits import Locator
 from locators import common as C
 
@@ -285,13 +286,21 @@ class Widgets:
         leaf = lambda w: w.split(">")[-1].strip()  # noqa: E731
 
         first = leaf(wanted[0])
-        if self.prompt_has(field, [first]) or (loose and self._has_close(field, first)):
+        weak: list[str] = []
+        if multi:
+            # Multi-select (skills): each value is its own pick, so "already set" needs a real match.
+            # 'SQL Assistant' does not count as 'SQL'; it's remembered and removed once SQL is picked.
+            items = self._selection_items(field)
+            for w in wanted:
+                hit = next((i for i in items if strong_match(leaf(w), i)), None)
+                if hit:
+                    self.log.info("%s: already set (%s)", desc, hit)
+                    return hit
+            weak = [i for i in items if any(match_score(leaf(w), i) >= 2 for w in wanted)]
+        elif self.prompt_has(field, [first]) or (loose and self._has_close(field, first)):
             self.log.info("%s: already set (%s)", desc, self.prompt_selection_text(field))
             return first
-        fallback = next((leaf(w) for w in wanted[1:] if self.prompt_has(field, [leaf(w)])), None)
-        if fallback and multi:
-            self.log.info("%s: already set (%s)", desc, self.prompt_selection_text(field))
-            return fallback
+        fallback = None if multi else next((leaf(w) for w in wanted[1:] if self.prompt_has(field, [leaf(w)])), None)
         pills = self.selected_pills(field)
         if fallback:
             self.log.info("%s: currently the fallback %r; looking for %r first", desc, fallback, first)
@@ -305,6 +314,10 @@ class Widgets:
             if not label and loose and len(path) == 1:
                 label = self._search_by_words(field, input_, candidate, desc)
             if label:
+                for wrong in weak:
+                    if wrong != label and not strong_match(label, wrong):
+                        self.log.info("%s: removing near-miss %r (now have %r)", desc, wrong, label)
+                        self.remove_selected(field, wrong)
                 if not multi:
                     self.act.close_popups()
                 self.log.info("%s: selected %r", desc, label)
@@ -384,6 +397,13 @@ class Widgets:
         for _level in range(4):
             options, labels = self._result_options()
             match = best_match([segments[0]], labels)
+            if match and not strong_match(segments[0], match[1]):
+                # Only a partial match ('SQL Assistant' for 'SQL'): the exact option may still be loading.
+                self.act.settle(1.2)
+                options, labels = self._result_options()
+                match = best_match([segments[0]], labels) or match
+                if match and not strong_match(segments[0], match[1]):
+                    self.log.debug("%s: no exact %r, best is %r (options: %s)", desc, segments[0], match[1], labels[:15])
             if match is None and len(segments) > 1:  # search may have jumped straight to the leaf
                 match = best_match([segments[-1]], labels)
                 if match:

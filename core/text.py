@@ -92,3 +92,15 @@ def closest_by_words(candidate: str, labels: Sequence[str]) -> tuple[int, str] |
         return None
     _, _, i = max(scored)
     return i, labels[i]
+
+
+def strong_match(wanted: str, label: str) -> bool:
+    """Same value, allowing only a bracketed note after it: 'SQL' ~ 'SQL', 'Python' ~
+    'Python (Programming Language)', 'Canada' ~ 'Canada (+1)'. But NOT 'SQL' ~ 'SQL Assistant'."""
+    w, l = normalize(wanted), normalize(label)
+    if not w or not l:
+        return False
+    if w == l:
+        return True
+    longer, shorter = (l, w) if len(l) > len(w) else (w, l)
+    return longer.startswith(shorter) and longer[len(shorter):].lstrip().startswith("(")
