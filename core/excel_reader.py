@@ -10,7 +10,7 @@ from openpyxl import load_workbook as _open
 
 from core import PROJECT_ROOT
 from core.models import (Account, AppData, Certification, EducationEntry, Job, LanguageEntry, Profile,
-                         WorkEntry)
+                         WorkEntry, company_from_url)
 from core.answers import QuestionRule
 from core.text import normalize, split_list
 
@@ -73,8 +73,9 @@ def load_app_data(path: Path) -> AppData:
             for row, r in _rows(sheets["jobs"]):
                 url = _get(r, "JobURL", "URL")
                 if url:
-                    data.jobs.append(Job(url=url, company=_get(r, "Company"), status=_get(r, "Status") or "Pending",
-                                         row=row, notes=_get(r, "Notes")))
+                    # Company left blank → take it from the URL (https://cibc.wd3... → CIBC)
+                    data.jobs.append(Job(url=url, company=_get(r, "Company") or company_from_url(url),
+                                         status=_get(r, "Status") or "Pending", row=row, notes=_get(r, "Notes")))
 
         if "accounts" in sheets:
             for row, r in _rows(sheets["accounts"]):

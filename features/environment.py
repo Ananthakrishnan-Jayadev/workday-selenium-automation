@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from core.config import load_config  # noqa: E402
 from core.driver import create_driver  # noqa: E402
-from core.excel_reader import load_app_data  # noqa: E402
+from core.excel_reader import WorkbookError, load_app_data  # noqa: E402
 from core.excel_writer import update_job_status  # noqa: E402
 from core.logger import get_logger, setup_logging  # noqa: E402
 from core.models import Job  # noqa: E402
@@ -19,27 +19,67 @@ from core.reporter import Reporter  # noqa: E402
 from core.session import Session  # noqa: E402
 
 
+class SetupError(Exception):
+    """A problem with the run's setup (no job, bad row, workbook missing). Shown as a clear message."""
+
+
+def _fatal(message: str) -> None:
+    """Print a readable error and stop. behave only prints 'HOOK-ERROR ...: SystemExit' for an
+    exception raised in a hook, so the explanation is printed here first."""
+    bar = "=" * 78
+    print(f"\n{bar}\n  CANNOT START\n", file=sys.stderr)
+    for line in message.splitlines():
+        print(f"  {line}", file=sys.stderr)
+    print(bar + "\n", file=sys.stderr, flush=True)
+    raise SystemExit(1)
+
+
+def _jobs_overview(context) -> str:
+    jobs = context.data.jobs
+    if not jobs:
+        return "The Jobs sheet has no job URLs."
+    rows = [f"  row {j.row}: {j.status or '(blank)':<15} {j.company or '?':<10} {j.url[:70]}" for j in jobs]
+    return "Jobs sheet:\n" + "\n".join(rows)
+
+
 def _resolve_job(context) -> Job:
     ud = context.config.userdata
     if ud.get("url"):
         return context.data.job_for_url(ud["url"])
     if ud.get("row"):
-        return context.data.job_for_row(int(ud["row"]))
+        try:
+            return context.data.job_for_row(int(ud["row"]))
+        except (LookupError, ValueError):
+            raise SetupError(f"There is no job on row {ud['row']} of the Jobs sheet.\n\n{_jobs_overview(context)}")
     pending = [j for j in context.data.jobs if j.status.lower() == "pending"]
     if pending:
         return pending[0]
-    raise SystemExit("No job given. Use  behave -D url=<job url>  or  -D row=<Jobs sheet row>, "
-                     "or mark a row as Pending in the Jobs sheet.")
+    raise SetupError(
+        "No job to run: there is no row with Status = Pending in the Jobs sheet.\n\n"
+        f"{_jobs_overview(context)}\n\n"
+        "Do one of these:\n"
+        "  - add the job URL to the Jobs sheet with Status = Pending, then run:  behave\n"
+        "  - run a specific row:   behave -D row=<row number>\n"
+        "  - run any URL:          behave -D url=\"<job url>\"")
 
 
 def before_all(context):
     context.cfg = load_config(context.config.userdata)
     setup_logging()
-    context.data = load_app_data(context.cfg.paths.workbook_path)
+    try:
+        context.data = load_app_data(context.cfg.paths.workbook_path)
+    except WorkbookError as exc:
+        _fatal(str(exc))
+    except PermissionError:
+        _fatal(f"Can't read {context.cfg.paths.workbook_path}.\nIs it open in Excel/LibreOffice with a lock? "
+               "Close it and try again.")
+    try:
+        context.job = _resolve_job(context)
+    except SetupError as exc:
+        _fatal(str(exc))
 
 
 def before_scenario(context, scenario):
-    context.job = _resolve_job(context)
     reporter = Reporter(context.cfg.paths.reports_path, context.job.company)
     setup_logging(reporter.log_file)
     log = get_logger()

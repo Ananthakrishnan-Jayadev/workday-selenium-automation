@@ -146,6 +146,27 @@ class Actions:
                     continue
         self.log.debug("popup still open after Escape and outside clicks")
 
+    def release_focus(self) -> None:
+        """Move keyboard focus out of the current field: Tab, then click a harmless spot on the page.
+
+        After a prompt field gets its value by Enter (Workday auto-selects a single match), its search
+        box can keep focus, and dropdowns clicked next didn't open on CIBC (2026-11-09 run: Province
+        and Phone type) until focus left the field."""
+        try:
+            ActionChains(self.driver).send_keys(Keys.TAB).perform()
+        except WebDriverException:
+            pass
+        time.sleep(0.2)
+        for loc in _NEUTRAL_TARGETS:
+            for el in waits.visible_elements(self.driver, loc):
+                try:
+                    self.scroll_into_view(el)
+                    ActionChains(self.driver).move_to_element(el).click().perform()
+                    time.sleep(0.3)
+                    return
+                except WebDriverException:
+                    continue
+
     def dismiss_overlays(self) -> None:
         """Close whatever is covering the page (open list, tooltip, toast)."""
         try:

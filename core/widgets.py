@@ -108,6 +108,7 @@ class Widgets:
             if listbox is None:
                 self.log.debug("%s: listbox did not open (attempt %d)", desc, attempt)
                 self.act.dismiss_overlays()
+                self.act.release_focus()  # another field may still hold focus and swallow the click
                 continue
 
             options, labels = self._listbox_options(listbox)
@@ -327,6 +328,7 @@ class Widgets:
                         self.remove_selected(field, wrong)
                 if not multi:
                     self.act.close_popups()
+                    self.act.release_focus()  # leave the search box so the next dropdown can open
                 self.log.info("%s: selected %r", desc, label)
                 return label
             self.act.close_popups()  # never leave a list open: it covers the fields below it
@@ -622,6 +624,10 @@ class Widgets:
             return self.act.type(loc("textarea"), str(value), desc=desc)
         if kind == "checkbox":
             boxes = self.driver.find_elements(By.CSS_SELECTOR, f'{field_css} input[type="checkbox"]')
+            if len(boxes) > 1 and len(values) == 1 and normalize(values[0]) in ("yes", "true", "all"):
+                # A group answered "Yes"/"All" (e.g. CIBC's two statements): tick every box.
+                labels = [lab for _, lab in self._labelled_inputs(field_css, "checkbox") if lab]
+                return self.select_checkboxes_by_label(field_css, labels, desc=desc)
             if len(boxes) > 1 or (values and normalize(values[0]) not in ("yes", "true", "no", "false")):
                 return self.select_checkboxes_by_label(field_css, values, desc=desc)
             on = value if isinstance(value, bool) else normalize(values[0] if values else "") in ("yes", "true")
