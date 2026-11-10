@@ -31,15 +31,19 @@ def split_list(value: str | Sequence[str] | None, sep: str = ";") -> list[str]:
 
 
 def match_score(candidate: str, label: str) -> int:
-    """3 = exact, 2 = label starts with candidate, 1 = label contains candidate, 0 = no match."""
+    """3 = exact, 2 = label starts with candidate, 1 = label contains candidate, 0 = no match.
+
+    Starts-with and contains are WHOLE WORDS: 'No' matches 'No (Canada)' and 'Yes - Newcomer' style
+    options, but not 'Not applicable' or 'Do not wish to declare' (Accenture, 2026-11-10), and
+    'Male' never matches 'Female'."""
     c, l = normalize(candidate), normalize(label)
     if not c or not l:
         return 0
     if l == c:
         return 3
-    if l.startswith(c):
+    if l.startswith(c) and not l[len(c)].isalnum():
         return 2
-    if c in l:
+    if re.search(rf"(?<![a-z0-9]){re.escape(c)}(?![a-z0-9])", l):
         return 1
     return 0
 

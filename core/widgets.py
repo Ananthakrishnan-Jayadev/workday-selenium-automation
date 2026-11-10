@@ -383,7 +383,7 @@ class Widgets:
         self.act.click(checkbox or option, desc=desc)
 
     def select_prompt(self, field: Locator, input_: Locator, candidates: str | Sequence[str], desc: str,
-                      multi: bool = False, loose: bool = False) -> str | None:
+                      multi: bool = False, loose: bool = False, exact: bool = False) -> str | None:
         """Pick a value in a prompt field. Each candidate may be a path: 'Job Board > LinkedIn'.
 
         Candidates are tried in order, and the first choice wins:
@@ -410,7 +410,7 @@ class Widgets:
                     self.log.info("%s: already set (%s)", desc, hit)
                     return hit
             weak = [i for i in items if any(match_score(leaf(w), i) >= 2 for w in wanted)]
-        elif self.prompt_has(field, [first]) or (loose and self._has_close(field, first)):
+        elif self.prompt_has(field, [first]) or (loose and not exact and self._has_close(field, first)):
             self.log.info("%s: already set (%s)", desc, self.prompt_selection_text(field))
             return first
         fallback = None if multi else next((leaf(w) for w in wanted[1:] if self.prompt_has(field, [leaf(w)])), None)
@@ -423,7 +423,7 @@ class Widgets:
 
         for candidate in wanted:
             path = [s.strip() for s in candidate.split(">") if s.strip()]
-            label = self._search_and_pick(field, input_, path, desc, strict=multi)
+            label = self._search_and_pick(field, input_, path, desc, strict=multi, exact=exact)
             if not label and loose and len(path) == 1:
                 label = self._search_by_words(field, input_, candidate, desc)
             if label:
@@ -475,7 +475,7 @@ class Widgets:
         return None
 
     def _search_and_pick(self, field: Locator, input_: Locator, path: list[str], desc: str,
-                         strict: bool = False) -> str | None:
+                         strict: bool = False, exact: bool = False) -> str | None:
         """Search for the first path segment, then walk down the hierarchy until a pill appears.
 
         strict (multi-select fields such as skills): only an exact option counts (a bracketed note
@@ -493,8 +493,9 @@ class Widgets:
             kind, auto = self._run_search(field, input_, term, desc)
             if kind == "auto":
                 # Enter with a single match: Workday selected it without showing a list.
+                need = 2 if exact else 1  # exact (question answers): equal or starts-with only
                 ok = (strong_match(target, auto) or strong_match(term, auto)) if strict else \
-                     (match_score(target, auto) >= 1 or match_score(term, auto) >= 1)
+                     (match_score(target, auto) >= need or match_score(term, auto) >= need)
                 if ok:
                     self.log.info("%s: Workday selected %r for %r", desc, auto, term)
                     return auto
@@ -521,7 +522,7 @@ class Widgets:
                 selected = self._selection_items(field)
                 keep = [i for i, l in enumerate(labels) if l not in selected]
                 options, labels = [options[i] for i in keep], [labels[i] for i in keep]
-            match = best_match([segments[0]], labels)
+            match = best_match([segments[0]], labels, min_score=2 if exact else 1)
             if strict and match and not strong_match(segments[0], match[1]):
                 self.act.settle(1.2)  # the exact option may still be loading
                 options, labels = self._result_options()
@@ -538,11 +539,11 @@ class Widgets:
                 # Only a partial match ('SQL Assistant' for 'SQL'): the exact option may still be loading.
                 self.act.settle(1.2)
                 options, labels = self._result_options()
-                match = best_match([segments[0]], labels) or match
+                match = best_match([segments[0]], labels, min_score=2 if exact else 1) or match
                 if match and not strong_match(segments[0], match[1]):
                     self.log.debug("%s: no exact %r, best is %r (options: %s)", desc, segments[0], match[1], labels[:15])
             if match is None and len(segments) > 1:  # search may have jumped straight to the leaf
-                match = best_match([segments[-1]], labels)
+                match = best_match([segments[-1]], labels, min_score=2 if exact else 1)
                 if match:
                     segments = [segments[-1]]
             if match is None:
@@ -724,7 +725,8 @@ class Widgets:
         if kind == "missing":
             return None
         if kind == "prompt":
-            return self.select_prompt(loc(), loc("input"), values, desc=desc, multi=multi, loose=loose)
+            return self.select_prompt(loc(), loc("input"), values, desc=desc, multi=multi, loose=loose,
+                                      exact=exact)
         if kind == "dropdown":
             return self.select_dropdown(loc('button[aria-haspopup="listbox"]'), values, desc=desc, exact=exact)
         if kind == "date":
