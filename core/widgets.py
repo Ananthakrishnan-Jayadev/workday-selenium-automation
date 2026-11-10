@@ -82,9 +82,32 @@ return {
 """
 
 
+def parse_date_answer(value: str):
+    """A full date from an answer, or None for a bare year.
+    'today', 'today+1', 'today+14', 'today+2w' (weeks), '23/10/2028' (day/month/year), '2028-10-23'."""
+    import datetime as _dt
+    v = (value or "").strip().lower().replace(" ", "")
+    m = re.fullmatch(r"today(?:\+(\d+)(d|w)?)?", v)
+    if m:
+        n = int(m.group(1) or 0) * (7 if m.group(2) == "w" else 1)
+        return _dt.date.today() + _dt.timedelta(days=n)
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return _dt.datetime.strptime(v, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def _label(el: WebElement) -> str:
+    """An option's visible label. `.text` is empty while an option is still animating in or is
+    off-screen (RBC: every option read as ''), so fall back to textContent and aria-label."""
     try:
-        return (el.get_attribute("data-automation-label") or el.text or "").strip()
+        for value in (el.get_attribute("data-automation-label"), el.text, el.get_attribute("textContent"),
+                      el.get_attribute("aria-label")):
+            if value and value.strip():
+                return " ".join(value.split())
+        return ""
     except StaleElementReferenceException:
         return ""
 
@@ -189,6 +212,9 @@ class Widgets:
                 self.act.dismiss_overlays()
                 self.act.release_focus()  # another field may still hold focus and swallow the click
                 continue
+            # The list can open before its options have text: wait until they do.
+            if not waits.poll(lambda: any(self._listbox_options(listbox)[1]), self.cfg.timeouts.short):
+                listbox = self._open_listbox(button) or listbox
 
             options, labels = self._listbox_options(listbox)
             match = best_match(wanted, labels, min_score=min_score)
@@ -702,7 +728,10 @@ class Widgets:
         if kind == "dropdown":
             return self.select_dropdown(loc('button[aria-haspopup="listbox"]'), values, desc=desc, exact=exact)
         if kind == "date":
-            return self.fill_date(field_css, desc, year=values[0] if values else "")
+            d = parse_date_answer(values[0]) if values else None
+            if d is None:  # just a year (education)
+                return self.fill_date(field_css, desc, year=values[0] if values else "")
+            return self.fill_date(field_css, desc, month=str(d.month), day=str(d.day), year=str(d.year))
         if kind == "textarea":
             return self.act.type(loc("textarea"), text_value, desc=desc)
         if kind == "checkbox":

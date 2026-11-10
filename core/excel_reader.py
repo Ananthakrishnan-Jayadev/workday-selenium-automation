@@ -161,7 +161,8 @@ def load_app_data(path: Path) -> AppData:
                 if _get(r, "Name"):
                     data.certifications.append(Certification(
                         name=_get(r, "Name"), number=_get(r, "Number"),
-                        expiry_month=_get(r, "ExpiryMonth"), expiry_year=_get(r, "ExpiryYear")))
+                        expiry_month=_get(r, "ExpiryMonth"), expiry_year=_get(r, "ExpiryYear"),
+                        expiry_day=_get(r, "ExpiryDay")))
 
         if "questions" in sheets:
             for row, r in _rows(sheets["questions"]):

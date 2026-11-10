@@ -218,7 +218,8 @@ class MyExperiencePage(BasePage):
                 css = self._field(f'[data-wdauto="certifications-{i}"]', L.CERTIFICATION["expiry"])
                 if css:
                     self._do(r, f"{tag} expiry", c.expiry_year,
-                             lambda: self.w.fill_date(css, f"{tag} expiry", month=c.expiry_month, year=c.expiry_year))
+                             lambda: self.w.fill_date(css, f"{tag} expiry", month=c.expiry_month, year=c.expiry_year,
+                                                      day=c.expiry_day))
 
     def fill_languages(self, r: FillReport, entries: list[LanguageEntry]) -> None:
         if entries and not self._section_present("languages"):

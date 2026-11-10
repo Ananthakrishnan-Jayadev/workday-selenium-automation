@@ -80,8 +80,8 @@ SHEETS: dict[str, dict] = {
     "Skills": {"headers": ["Skill", "Fallback 1", "Fallback 2"], "widths": [36, 28, 28],
                "rows": [["Python", "", ""], ["SQL", "PostgreSQL", "MySQL"]]},
     "Certifications": {
-        "headers": ["Name", "Number", "ExpiryMonth", "ExpiryYear"],
-        "widths": [40, 20, 12, 12],
+        "headers": ["Name", "Number", "ExpiryDay", "ExpiryMonth", "ExpiryYear"],
+        "widths": [40, 20, 10, 12, 12],
         "rows": [],
     },
     # ---- Phase 3 -------------------------------------------------------------------------
