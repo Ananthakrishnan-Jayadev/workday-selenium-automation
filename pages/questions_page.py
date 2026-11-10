@@ -69,7 +69,8 @@ class QuestionsPage(BasePage):
                 self.log.warning("Q: %s failed: %s", short, exc)
                 result = None
             if result:
-                self.log.info("Q: %s → %r (Questions row %s)", short, result, rule.row)
+                shown = result if isinstance(result, str) else rule.answers[0]  # text boxes return an element
+                self.log.info("Q: %s → %r (Questions row %s)", short, shown, rule.row)
                 r.filled.append(short)
             else:
                 r.failed.append(f"{short} (none of {rule.answers} from Questions row {rule.row} is an option;"

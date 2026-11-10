@@ -201,7 +201,18 @@ class MyExperiencePage(BasePage):
             if self._entry("certifications", i) is None:
                 r.failed.append(f"{tag}: could not add entry")
                 continue
-            self._fill_in(r, "certifications", i, f"{tag} name", L.CERTIFICATION["name"], c.name)
+            # Certifications are optional and each company has its own list: one that isn't listed is
+            # skipped with a warning instead of pausing the run (TD had no AWS ML / Airflow certificate).
+            css = self._field(f'[data-wdauto="certifications-{i}"]', L.CERTIFICATION["name"])
+            if css is None:
+                r.skipped.append(f"{tag} name (not on this page)")
+                continue
+            got = self.w.fill_auto(css, c.name, desc=f"{tag} name")
+            if not got:
+                r.skipped.append(f"{tag} (not in this company's certification list)")
+                self.act.close_popups()
+                continue
+            r.filled.append(f"{tag} name")
             self._fill_in(r, "certifications", i, f"{tag} number", L.CERTIFICATION["number"], c.number)
             if c.expiry_year:
                 css = self._field(f'[data-wdauto="certifications-{i}"]', L.CERTIFICATION["expiry"])

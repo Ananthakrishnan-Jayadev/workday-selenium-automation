@@ -51,6 +51,36 @@ return null;
 """
 
 
+_OPTION_CSS = '[role="option"], [data-automation-id="promptOption"]'
+
+# Container of the first visible option that isn't a selected pill (fallback popup detection).
+_JS_OPTION_CONTAINER = """
+const shown = el => el.getClientRects().length > 0;
+const opts = [...document.querySelectorAll('[role="option"], [data-automation-id="promptOption"]')].filter(o =>
+    shown(o) && !o.closest('[data-automation-id="selectedItemList"], [data-automation-id="selectedItem"]'));
+if (!opts.length) return null;
+const o = opts[opts.length - 1];
+return o.closest('[role="listbox"]') || o.parentElement.parentElement || o.parentElement;
+"""
+
+# Snapshot of a dropdown's state after a click that didn't open a detectable list.
+_JS_DROPDOWN_STATE = """
+const b = arguments[0], shown = el => el.getClientRects().length > 0;
+const opts = [...document.querySelectorAll('[role="option"]')].filter(shown);
+const prompts = [...document.querySelectorAll('[data-automation-id="promptOption"]')].filter(shown);
+const boxes = [...document.querySelectorAll('[role="listbox"]')].filter(shown);
+const dialogs = [...document.querySelectorAll('[role="dialog"], [data-automation-id="wd-popup-frame"], [aria-modal="true"]')].filter(shown);
+return {
+  aria_expanded: b.getAttribute('aria-expanded'), aria_controls: b.getAttribute('aria-controls'),
+  button_text: b.textContent.trim().slice(0, 40), focused: (document.activeElement || {}).outerHTML?.slice(0, 120),
+  visible_options: opts.length, first_options: opts.slice(0, 3).map(o => o.textContent.trim().slice(0, 30)),
+  visible_prompt_options: prompts.length,
+  visible_listboxes: boxes.map(x => (x.getAttribute('data-automation-id') || x.tagName) + ':' + x.children.length),
+  visible_dialogs: dialogs.map(d => (d.getAttribute('data-automation-id') || d.getAttribute('aria-label') || d.tagName)),
+};
+"""
+
+
 def _label(el: WebElement) -> str:
     try:
         return (el.get_attribute("data-automation-label") or el.text or "").strip()
@@ -74,16 +104,46 @@ class Widgets:
         except WebDriverException:
             return ""
 
-    def _open_listbox(self) -> WebElement | None:
+    def _open_listbox(self, button: Locator | None = None) -> WebElement | None:
+        """The open option list of a dropdown, found in this order:
+          1. the element the button points to (aria-controls / aria-owns)
+          2. the last visible [role=listbox] that has options (Workday appends popups to <body>)
+          3. the container of any visible option ([role=option] or promptOption) that isn't a selected pill
+        (2) is what CIBC/BMO/TD use; (1) and (3) cover tenants whose popup is built differently."""
         def find():
+            if button is not None:
+                try:
+                    btn = self.driver.find_element(*button)
+                    for attr in ("aria-controls", "aria-owns"):
+                        ref = btn.get_attribute(attr)
+                        if ref:
+                            for el in self.driver.find_elements(By.ID, ref):
+                                if el.is_displayed() and el.find_elements(By.CSS_SELECTOR, _OPTION_CSS):
+                                    return el
+                except WebDriverException:
+                    pass
             boxes = [b for b in waits.visible_elements(self.driver, C.OPEN_LISTBOX)
                      if b.find_elements(*C.LISTBOX_OPTION)]
-            return boxes[-1] if boxes else None  # Workday appends popups at the end of <body>
+            if boxes:
+                return boxes[-1]
+            return self.driver.execute_script(_JS_OPTION_CONTAINER)
         return waits.poll(find, self.cfg.timeouts.short)
 
     def _listbox_options(self, listbox: WebElement) -> tuple[list[WebElement], list[str]]:
-        options = listbox.find_elements(*C.LISTBOX_OPTION)
+        options = [o for o in listbox.find_elements(By.CSS_SELECTOR, _OPTION_CSS)
+                   if not self.driver.execute_script(
+                       "return !!arguments[0].closest('[data-automation-id=\"selectedItemList\"]')", o)]
         return options, [_label(o) for o in options]
+
+    def _dropdown_diagnostics(self, button: Locator, desc: str) -> None:
+        """Log what the page looks like when a dropdown didn't open, and save a screenshot + HTML."""
+        try:
+            info = self.driver.execute_script(_JS_DROPDOWN_STATE, self.driver.find_element(*button))
+        except WebDriverException as exc:
+            info = f"(could not inspect: {type(exc).__name__})"
+        self.log.warning("%s: list not detected after clicking. Page state: %s", desc, info)
+        if self.debug_capture:
+            self.debug_capture(f"dropdown_not_open_{desc}")
 
     def select_dropdown(self, button: Locator, candidates: str | Sequence[str], desc: str,
                         exact: bool = False) -> str | None:
@@ -106,11 +166,13 @@ class Widgets:
                 el = self.act.find(button)
                 self.act.scroll_into_view(el)
                 el.send_keys(Keys.ENTER)
-                if self._open_listbox() is None:
+                if self._open_listbox(button) is None:
                     el.send_keys(Keys.ARROW_DOWN)
-            listbox = self._open_listbox()
+            listbox = self._open_listbox(button)
             if listbox is None:
                 self.log.debug("%s: listbox did not open (attempt %d)", desc, attempt)
+                if attempt == 1:
+                    self._dropdown_diagnostics(button, desc)
                 self.act.dismiss_overlays()
                 self.act.release_focus()  # another field may still hold focus and swallow the click
                 continue
@@ -700,7 +762,7 @@ class Widgets:
         """Open a dropdown, read its options, close it (used to tell you what an unknown question offers)."""
         try:
             self.act.click(button, desc="peek dropdown")
-            listbox = self._open_listbox()
+            listbox = self._open_listbox(button)
             labels = self._listbox_options(listbox)[1] if listbox else []
         except Exception:  # noqa: BLE001 - purely informational
             labels = []
@@ -752,6 +814,11 @@ class Widgets:
             return True
         self._click_input_or_label(checkbox, desc)
         ok = bool(waits.poll(lambda: self._is_checked(checkbox) == checked, self.cfg.timeouts.short))
+        if not ok:
+            # The label click didn't toggle it (TD's employment-type checkboxes): click the box itself.
+            self.log.debug("%s: label click didn't toggle the checkbox, clicking the input", desc)
+            self.act.click(checkbox, desc=f"{desc} (input)")
+            ok = bool(waits.poll(lambda: self._is_checked(checkbox) == checked, self.cfg.timeouts.short))
         if not ok:
             self.log.warning("%s: checkbox did not change to %s", desc, checked)
         return ok

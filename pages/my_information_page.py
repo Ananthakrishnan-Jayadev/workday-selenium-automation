@@ -30,7 +30,9 @@ class MyInformationPage(BasePage):
         if value in (None, "", []):
             report.skipped.append(f"{label} (no value in Excel)")
             return
-        if not self._present(locator):
+        if not self._present(locator) and not waits.poll(lambda: self._present(locator), 3):
+            # Some fields render a moment after the rest of the form (Citi: How did you hear,
+            # "employed by Citi"), so give them a few seconds before calling them absent.
             report.skipped.append(f"{label} (not on this page)")
             return
         self.act.close_popups()  # a list left open by the previous field would cover this one
