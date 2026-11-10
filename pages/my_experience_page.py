@@ -86,6 +86,27 @@ class MyExperiencePage(BasePage):
         self.s.checkpoint(f"{kind}_entry_{i}_missing")
         return None
 
+    def _delete_entry(self, field_css: str, label: str) -> bool:
+        """Click the Delete button of the panel ("Certifications 1") that holds `field_css`.
+        Used for an entry we added but could not fill: an empty entry blocks Save and Continue with
+        'The field Certification is required' (Manulife, McKesson)."""
+        js = """
+        const f = document.querySelector(arguments[0]);
+        const panel = f && f.closest('[role="group"][aria-labelledby$="-panel"]');
+        if (!panel) return null;
+        return [...panel.querySelectorAll('button')].find(b => b.textContent.trim() === 'Delete') || null;
+        """
+        try:
+            button = self.driver.execute_script(js, field_css)
+        except Exception:  # noqa: BLE001
+            button = None
+        if button is None:
+            self.log.warning("%s: no Delete button found for the empty entry", label)
+            return False
+        self.act.click(button, desc=f"{label}: Delete")
+        gone = waits.poll(lambda: not waits.is_present(self.driver, (By_CSS, field_css)), self.cfg.timeouts.short)
+        return bool(gone)
+
     def _field(self, entry: str, aids: list[str]) -> str | None:
         """CSS of the first of `aids` present inside the entry (re-tags first, in case of a re-render)."""
         for a in aids:
@@ -209,8 +230,13 @@ class MyExperiencePage(BasePage):
                 continue
             got = self.w.fill_auto(css, c.name, desc=f"{tag} name")
             if not got:
-                r.skipped.append(f"{tag} (not in this company's certification list)")
                 self.act.close_popups()
+                # Remove the empty entry we just added, or Save and Continue says it's required.
+                # Only when the entry is still empty: never delete one Workday pre-filled.
+                if not self.w.selected_pills((By_CSS, css)) and self._delete_entry(css, tag):
+                    r.skipped.append(f"{tag} (not in this company's certification list; empty entry deleted)")
+                else:
+                    r.skipped.append(f"{tag} (not in this company's certification list)")
                 continue
             r.filled.append(f"{tag} name")
             self._fill_in(r, "certifications", i, f"{tag} number", L.CERTIFICATION["number"], c.number)

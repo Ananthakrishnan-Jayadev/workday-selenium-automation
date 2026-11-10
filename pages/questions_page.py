@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from selenium.webdriver.common.by import By
 
+from core import waits
 from core.answers import find_rule
 from core.models import AppData, Job
 from locators import questions as L
@@ -39,6 +40,12 @@ class QuestionsPage(BasePage):
         r = FillReport(page=self.NAME)
         company = job.company if job else ""
         questions = self.questions()
+        if not questions:
+            # Thomson Reuters: the questions rendered several seconds after the page heading, so an
+            # immediate look found none and Save and Continue then went nowhere. Wait for them.
+            questions = waits.poll(lambda: self.questions() or None, min(15, self.cfg.timeouts.page_change)) or []
+            if questions:
+                self.log.info("%s: questions appeared after a wait (%d)", self.NAME, len(questions))
         if not questions:
             self.log.warning("%s: no questions found on the page", self.NAME)
         self.unanswered: list[str] = []

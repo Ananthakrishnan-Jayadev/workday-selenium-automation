@@ -14,7 +14,7 @@ def step_sign_in(context):
     s = context.session
     page = AuthPage(s)
 
-    current = page.wait_for_page(lambda p: p in APPLICATION_PAGES or p in ("sign_in", "create_account"))
+    current = page.wait_for_page(lambda p: p in APPLICATION_PAGES or p in ("sign_in", "create_account", "sign_in_chooser"))
     if current in APPLICATION_PAGES:
         log.info("already signed in (on %s)", current)
         return

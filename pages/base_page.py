@@ -57,6 +57,8 @@ class BasePage:
                 return "sign_in"
             if waits.is_present(self.driver, A.CREATE_ACCOUNT_SUBMIT_BUTTON):
                 return "create_account"
+            if waits.is_present(self.driver, A.SIGN_IN_WITH_EMAIL):
+                return "sign_in_chooser"
             step = self.active_step_name()
             if step and normalize(step) in C.STEP_NAMES:
                 return C.STEP_NAMES[normalize(step)]

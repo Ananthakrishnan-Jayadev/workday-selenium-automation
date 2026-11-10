@@ -86,11 +86,11 @@ def step_complete_page(context, title):
     s = context.session
     page = page_cls(s)
 
-    current = page.wait_for_page(lambda p: p not in ("sign_in", "create_account", "job_posting"))
+    current = page.wait_for_page(lambda p: p not in ("sign_in", "create_account", "sign_in_chooser", "job_posting"))
     if current == "error":
         if not page.recover_from_error_page():
             raise AssertionError(f'Workday error page instead of "{title}", and refreshing did not fix it')
-        current = page.wait_for_page(lambda p: p not in ("sign_in", "create_account", "job_posting", "error"))
+        current = page.wait_for_page(lambda p: p not in ("sign_in", "create_account", "sign_in_chooser", "job_posting", "error"))
     if current != name:
         log.info('"%s" page not shown (on %s), so skipping it', title, current)
         return

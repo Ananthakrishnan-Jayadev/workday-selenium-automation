@@ -7,6 +7,10 @@ SIGN_IN_CONTENT = aid("signInContent")
 FORM = aid("signInFormo")                      # sic: Workday's id really is "signInFormo"
 TITLE = (By.CSS_SELECTOR, "#authViewTitle")    # "Create Account" or "Sign In"
 
+# Some tenants (Thomson Reuters) first show a chooser: "Sign in with Apple / Google / OR /
+# Sign in with email". Clicking the email button opens the normal form below.
+SIGN_IN_WITH_EMAIL = aid("SignInWithEmailButton", "button")
+
 SIGN_IN_LINK = aid("signInLink", "button")              # Create Account mode → switch to Sign In
 CREATE_ACCOUNT_LINK = aid("createAccountLink", "button")  # Sign In mode → switch to Create Account
 

@@ -69,6 +69,10 @@ in search results; a missing skill is skipped with a warning).
 - ✅ Application Questions, Voluntary Disclosures (terms checkbox), Self Identify (skipped: not on CIBC).
 - ✅ Review stop with s/k/f/r prompt; status written to the Jobs sheet; Submit guard.
 - ⏭ Not built: `run.py` batch runner. Carried over to the next version.
+- ✅ Live runs to Review on 11 tenants (2026-11-09/10): CIBC, BMO, TD, Citi, RBC, Accenture,
+  Manulife, McKesson, Canadian Tire, NVIDIA, Thomson Reuters. Fixes they drove: whole-word matching,
+  exact answers for search-style questions, list markers (`a.`/`b.`) ignored, "Sign in with email"
+  chooser, empty certification entries deleted, late-rendering questions waited for.
 
 **Goal:** complete end-to-end runs to Review, and batch mode.
 

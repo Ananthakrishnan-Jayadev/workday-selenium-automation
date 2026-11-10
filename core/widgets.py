@@ -27,7 +27,7 @@ from core import waits
 from core.actions import Actions
 from core.logger import get_logger
 from core.text import (best_match, closest_by_words, contains_words, key_words, match_score, normalize,
-                       split_list, strong_match, word_overlap)
+                       same, split_list, strong_match, word_overlap)
 from core.waits import Locator
 from locators import common as C
 
@@ -528,13 +528,15 @@ class Widgets:
                 options, labels = self._result_options()
                 selected = self._selection_items(field)
                 pairs = [(o, l) for o, l in zip(options, labels) if l not in selected]
-                exact = next(((o, l) for o, l in pairs if strong_match(segments[0], l)), None)
-                if exact is None:
+                # the option spelled exactly as in Excel first, then 'SQL (...)' / '... (SQL)'
+                hit = next(((o, l) for o, l in pairs if same(segments[0], l)), None) or \
+                      next(((o, l) for o, l in pairs if strong_match(segments[0], l)), None)
+                if hit is None:
                     self.log.warning("%s: no exact %r in Workday's list (has: %s). Not picking a near-miss; "
                                      "put the exact name you want in Excel", desc, segments[0], labels[:15])
                     return None
-                options, labels = [exact[0]], [exact[1]]
-                match = (0, exact[1])
+                options, labels = [hit[0]], [hit[1]]
+                match = (0, hit[1])
             if match and not strong_match(segments[0], match[1]):
                 # Only a partial match ('SQL Assistant' for 'SQL'): the exact option may still be loading.
                 self.act.settle(1.2)

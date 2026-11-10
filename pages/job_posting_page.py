@@ -8,7 +8,7 @@ from locators import job_posting as L
 from pages.base_page import BasePage
 
 # Pages that mean "the application has started"
-AFTER_APPLY = {"sign_in", "create_account", "my_information", "my_experience", "application_questions",
+AFTER_APPLY = {"sign_in", "create_account", "sign_in_chooser", "my_information", "my_experience", "application_questions",
                "voluntary_disclosures", "self_identify", "review"}
 
 

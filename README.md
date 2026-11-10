@@ -7,6 +7,10 @@ Fills Workday job applications from an Excel workbook, from the job URL through 
 > sign in → My Information → My Experience → Application Questions → Voluntary Disclosures →
 > **stops on Review**. You submit; the outcome goes back into the Jobs sheet.
 > Not built yet: the batch runner (`run.py`). Run jobs one at a time with `behave -D row=N`.
+>
+> **Live-tested (2026-11-09/10) on 11 tenants:** CIBC, BMO, TD, Citi, RBC, Accenture, Manulife,
+> McKesson, Canadian Tire, NVIDIA, Thomson Reuters. Each new company mostly needs new rows in the
+> Questions sheet (its own question wording and option labels); the script pauses and lists them.
 
 ## Documents
 | Doc | What's in it |
@@ -67,7 +71,7 @@ behave -D slow_mo_ms=200
 | Education | school | Degree / FieldOfStudy can list fallbacks |
 | Languages | language | Proficiency applies to every proficiency dropdown |
 | Skills | skill | must be Workday's **exact** skill name (a bracketed note is fine) |
-| Certifications | certificate | only used if the tenant has the section (CIBC doesn't) |
+| Certifications | certificate | only used if the tenant has the section (CIBC doesn't). Not in the company's list → skipped, and the empty entry is deleted so Save isn't blocked |
 | Questions | rule | keywords in the question → answer (see below), incl. the terms checkbox |
 
 **Fallbacks get their own columns** (tried left to right; the first one the company's form offers wins):
@@ -85,6 +89,10 @@ still works as a separator, but columns are easier to read.)
 **Matching**
 - Case, apostrophes, dashes and slashes are ignored. `Category > Value` picks from nested lists
   (`Job Board/Social Media > LinkedIn`).
+- **Everything matches whole words**: `No` matches `No (Canada)` but never `Not applicable` or
+  `Do not wish to declare`; `Male` never matches `Female`.
+- List markers in front of options are ignored: `No` matches `b. No, I Don't Have A Disability (Canada)`
+  and `South Asian` matches `i. South Asian (e.g., East Indian…)` (McKesson).
 - Profile / My Experience values match an option that equals them, starts with them
   (`Canada` → `Canada (+1)`) or contains them as whole words (`Fluent` → `5 - Fluent`).
 - **Question answers are strict**: the option must equal the answer or start with it
@@ -92,7 +100,15 @@ still works as a separator, but columns are easier to read.)
 - **Field of Study** takes the closest option by whole words before a fallback, searching your words in
   order (`Artificial Intelligence` → `Artificial Intelligence and Robotics`; `Data Analytics` looks for
   a `Data …` option first). Generic words such as *science* don't count on their own.
-- **Skills** need Workday's exact name (a bracketed note is fine). One Workday doesn't list is skipped.
+- **Skills** need Workday's exact name. A bracketed note is fine either way: `Python` →
+  `Python (Programming Language)`, `SQL` → `Structured Query Language (SQL)`; the option spelled
+  exactly as in Excel is preferred. `SQL` never picks `SQL Assistant`. A skill Workday doesn't list
+  is skipped.
+- **Different wording per company is normal.** When an answer isn't an option, the log prints every
+  option the company offers: add the one you want as the next fallback (e.g. Race: `South Asian` ·
+  `Asian - South Asian` · `Racialized/ South Asian`; PhoneType: `Mobile` · `Personal Primary` ·
+  `Home Cellular`). To catch a new wording of a known question, add its phrase to that row's Keywords
+  (e.g. `employer support to obtain` on the sponsorship row).
 
 **Questions sheet**: `Keywords | Answer | Fallback 1-3 | Company | Page | Notes`
 - `authorized to work; eligible to work`: any of these phrases. `relative; family member + td`:
@@ -140,6 +156,10 @@ clicks Submit: a guard refuses any footer button labelled Submit, and any button
 |---|---|
 | "Something went wrong. Please refresh the page" right after sign-in | detected, page refreshed (up to twice) |
 | Sign In button covered by an invisible `click_filter` div | the div is clicked |
+| "Sign in with Apple / Google / OR / Sign in with email" chooser before the form (NVIDIA, Thomson Reuters) | **Sign in with email** is clicked; Apple/Google never |
+| Questions render seconds after the page heading (Thomson Reuters) | an empty questions page is waited on (15s) before moving on |
+| An added certification entry left empty makes Save fail ("Certification is required") | the empty entry is deleted |
+| Options numbered `a.` / `b.` / `i.` (McKesson) | the marker is ignored when matching |
 | Dates: each month/year box is covered by a display div | the display div is clicked, digits typed, value verified |
 | Search lists show "No Items." / the full A-Z list / "No matches found" before the real results | only a list containing a match counts; "No matches" only after ~2.5s |
 | Enter with a single match selects it without showing a list | the field is checked first |

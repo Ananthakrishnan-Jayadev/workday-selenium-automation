@@ -29,7 +29,17 @@ class AuthPage(BasePage):
             return "create_account"
         return None
 
+    def choose_email_sign_in(self) -> None:
+        """Get past the 'Sign in with Apple / Google / email' chooser some tenants show first."""
+        if self.mode() or not waits.is_visible(self.driver, L.SIGN_IN_WITH_EMAIL):
+            return
+        self.act.click(L.SIGN_IN_WITH_EMAIL, desc="'Sign in with email'")
+        if not waits.poll(lambda: self.mode(), self.cfg.timeouts.default):
+            raise AssertionError("Clicked 'Sign in with email' but no sign-in form appeared")
+        self.log.info("chose 'Sign in with email'")
+
     def switch_to_sign_in(self) -> None:
+        self.choose_email_sign_in()
         if self.mode() == "sign_in":
             return
         self.act.click(L.SIGN_IN_LINK, desc="'Sign In' link")

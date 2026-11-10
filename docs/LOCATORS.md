@@ -80,6 +80,7 @@ so the numbering becomes "1 of 5". CIBC has **no separate Self Identify step**.
 ## Create Account / Sign In (same form, two modes)
 | Element | Locator | Status |
 |---|---|---|
+| "Sign in with email" chooser (some tenants, e.g. Thomson Reuters, show it before the form) | `button[data-automation-id="SignInWithEmailButton"]` (capital S). Apple/Google buttons are ignored | ✅ DUMP + RUN (Thomson Reuters, NVIDIA) |
 | Form container | `signInContent` → `form[data-automation-id="signInFormo"]` (sic, "Formo") | ✅ DUMP |
 | Mode title | `h3#authViewTitle`: text "Create Account" or "Sign In" | ✅ DUMP |
 | Switch to Sign In | `button[data-automation-id="signInLink"]` (on Create Account) | ✅ DUMP |
@@ -135,6 +136,8 @@ Notes:
 |---|---|---|
 | Page marker | `applyFlowMyExpPage` | ✅ RUN |
 | Sections | `div[role=group]` containing `h4` "Work Experience", "Education", "Languages", "Skills", "Resume/CV", "Websites", "Social Network URLs". No Certifications section on CIBC | ✅ RUN |
+| Entry Delete button | the entry panel `div[role=group][aria-labelledby$="-panel"]` (heading `h5` "Certifications 1") → `button` with text "Delete" (no automation id) | ✅ DUMP (McKesson) |
+| Certification fields | `formField-certification` (prompt), `formField-certificationNumber`, `formField-expirationDate`; McKesson also requires an Issued Date | ✅ RUN |
 | Add button (empty section) | `button[data-automation-id="add-button"]` inside the section group | ✅ RUN |
 | Add Another (after first entry) | `Add`, `Add Another`, `add-another-button` or text starting "Add" | ⚠️ |
 | Entry container | found from the entry's first field (`formField-jobTitle`, `formField-schoolName`, `button[name=language]`); tagged `data-wdauto="work-1"` at runtime | logic tested on mock |

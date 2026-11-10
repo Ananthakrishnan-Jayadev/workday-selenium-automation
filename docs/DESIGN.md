@@ -143,10 +143,14 @@ close button, toast) if visible. It never clicks anything that could submit.
 All comparisons use `normalize()` (lowercase; apostrophes, dashes, slashes and extra spaces ignored).
 | Function | Meaning | Used for |
 |---|---|---|
-| `best_match` | exact > starts-with > contains | picking an option from a list |
-| `strong_match` | equal, or equal plus a bracketed note (`Python (Programming Language)`) | skills; "already set" for multi-select |
+| `match_score` | 3 exact, 2 starts-with, 1 contains, 0 none; starts-with/contains are **whole words** (`No` ≠ `Not applicable`, `Male` ≠ `Female`) | everything below |
+| `best_match` | exact > starts-with > contains; `min_score=2` (exact mode, question answers) drops "contains" | picking an option from a list |
+| `strong_match` | equal, equal plus a bracketed note (`Python (Programming Language)`), or the bracketed abbreviation (`SQL` ~ `Structured Query Language (SQL)`) | skills; "already set" for multi-select |
 | `contains_words` | whole-word containment (`Fluent` in `5 - Fluent`, not `Male` in `Female`) | "already set" for dropdowns |
 | `closest_by_words` | most shared distinctive whole words; generic words (science, engineering, ...) don't count alone | Field of Study (`loose`) |
+
+A leading list marker on an option (`a. `, `b) `, `ii. `, `3. `) is stripped before matching
+(`_bare`), so McKesson's `b. No, I Don't Have A Disability (Canada)` starts with `No`.
 
 ### 4.4 Dropdowns: `select_dropdown(button, candidates)`
 Workday single-selects are `button[aria-haspopup="listbox"]`, not `<select>`.
@@ -173,7 +177,10 @@ Used for How did you hear, phone code, Field of Study, Skills.
   3. "No matches found" only if it stays ~2.5s (it flashes up before the real results).
 - **Pick**: `best_match`; if only a partial match, wait 1.2s for the exact option to load.
   Multi: options already selected are never clicked again (Workday rejects duplicate skills), and
-  with no exact option nothing is picked.
+  with no exact option nothing is picked. Among exact options, the one spelled as in Excel wins
+  over a bracketed variant.
+- **Exact** (question answers, `exact=True`): equal or starts-with only, also for an option Workday
+  auto-selects on Enter.
 - **Hierarchy**: `Category > Value`. If clicking an option opens a sub-list (radio rows), go down.
 - **Loose** (Field of Study): if a candidate isn't listed, search its distinctive words one by one
   and take the closest option before moving to the next fallback.
@@ -190,17 +197,22 @@ Sections are found by their `<h4>` heading. Entries are found **page-wide** by t
 the largest ancestor holding exactly one such field, tagged at runtime as `data-wdauto="work-1"`, so
 its fields are addressed with plain CSS. Add is clicked until entry *i* exists; existing entries are
 filled in place. "I currently work here" is set before the dates (it removes the end date).
+Certifications are optional: one not in the company's list is skipped, and if its entry is still
+empty, the panel's **Delete** button (`[role=group][aria-labelledby$="-panel"] button` "Delete") is
+clicked, because an empty entry fails Save with "Certification is required" (Manulife, McKesson).
 
 ### 4.8 Questionnaire pages (`pages/questions_page.py`)
 Questions are the top-level `formField-<hex id>` containers (ids differ per company, so they're
 matched by **text**). For each: read the legend text and required flag, find the Questions rule,
 auto-detect the control (`widgets.detect`: date / prompt / dropdown / textarea / radio / checkbox /
 text) and fill it (`widgets.fill_auto`). Already-answered questions without a rule are left alone;
-required unanswered ones are reported with their dropdown options.
+required unanswered ones are reported with their dropdown options. If a questions page shows no
+questions at first, they are waited for (up to 15s): on Thomson Reuters they rendered late.
 
 ### 4.9 Waiting, errors and recovery
 - `current_page()` returns `error` for Workday's "Something went wrong" screen, otherwise the page
-  marker (`applyFlow*Page`), sign-in/create-account form, or progress-bar step name.
+  marker (`applyFlow*Page`), sign-in/create-account form, `sign_in_chooser` (the "Sign in with
+  email" button some tenants show before the form; it is clicked), or progress-bar step name.
 - After sign-in and before filling any page, the page's own form marker is awaited; on the error
   screen, or if the form never loads, the page is refreshed (up to twice).
 - Save and Continue waits for the page (or the exact marker, for Primary → Secondary) to change;
@@ -235,8 +247,8 @@ found, the job is marked `Failed: no account` (V1 does not create accounts).
 |---|---|
 | FirstName, LastName, PreferredName | |
 | Country, AddressLine1, City, Province, PostalCode | |
-| PhoneType (`Mobile`), PhoneCountryCode, Phone | |
-| HowDidYouHear | `LinkedIn;Job Board;Other` |
+| PhoneType (`Mobile` · `Personal Primary` · `Home Cellular`), PhoneCountryCode, Phone | |
+| HowDidYouHear | `LinkedIn` · `Social Network: Linkedin` · `Job Board/Social Media > LinkedIn` · `Social Media` |
 | PreviouslyWorkedHere | `No` |
 | LinkedIn, Website | |
 | ResumePath | `/home/.../resume.pdf` |
@@ -254,7 +266,7 @@ found, the job is marked `Failed: no account` (V1 does not create accounts).
 | Skill |
 
 ### `Certifications` (optional)
-| Name | Number | ExpiryMonth | ExpiryYear |
+| Name | Number | ExpiryDay | ExpiryMonth | ExpiryYear |
 
 ### Fallback columns (all sheets)
 Fallbacks have their own columns, tried left to right: Profile `Value, Fallback 1, Fallback 2`;

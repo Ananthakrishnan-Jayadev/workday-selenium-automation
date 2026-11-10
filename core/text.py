@@ -17,6 +17,16 @@ def normalize(text: str | None) -> str:
     return _SPACES.sub(" ", t).strip()
 
 
+# "a. Yes", "b) No", "i. South Asian", "3. Fluent": list markers some tenants (McKesson) put in front of
+# every option. They are ignored when matching, so 'No' matches "b. No, I Don't Have A Disability".
+_LIST_MARKER = re.compile(r"^(?:[a-z]|[ivx]{2,5}|\d{1,2})[.)]\s+")
+
+
+def _bare(text: str | None) -> str:
+    """normalize() without a leading list marker."""
+    return _LIST_MARKER.sub("", normalize(text))
+
+
 def digits(text: str | None) -> str:
     return re.sub(r"\D", "", text or "")
 
@@ -36,7 +46,7 @@ def match_score(candidate: str, label: str) -> int:
     Starts-with and contains are WHOLE WORDS: 'No' matches 'No (Canada)' and 'Yes - Newcomer' style
     options, but not 'Not applicable' or 'Do not wish to declare' (Accenture, 2026-11-10), and
     'Male' never matches 'Female'."""
-    c, l = normalize(candidate), normalize(label)
+    c, l = _bare(candidate), _bare(label)
     if not c or not l:
         return 0
     if l == c:
@@ -104,11 +114,14 @@ def closest_by_words(candidate: str, labels: Sequence[str]) -> tuple[int, str] |
 
 def strong_match(wanted: str, label: str) -> bool:
     """Same value, allowing only a bracketed note after it: 'SQL' ~ 'SQL', 'Python' ~
-    'Python (Programming Language)', 'Canada' ~ 'Canada (+1)'. But NOT 'SQL' ~ 'SQL Assistant'."""
-    w, l = normalize(wanted), normalize(label)
+    'Python (Programming Language)', 'Canada' ~ 'Canada (+1)'. But NOT 'SQL' ~ 'SQL Assistant'.
+    Also the abbreviation in brackets: 'SQL' ~ 'Structured Query Language (SQL)' (McKesson)."""
+    w, l = _bare(wanted), _bare(label)
     if not w or not l:
         return False
     if w == l:
+        return True
+    if re.fullmatch(rf".+\(\s*{re.escape(w)}\s*\)", l):
         return True
     longer, shorter = (l, w) if len(l) > len(w) else (w, l)
     return longer.startswith(shorter) and longer[len(shorter):].lstrip().startswith("(")
@@ -117,5 +130,5 @@ def strong_match(wanted: str, label: str) -> bool:
 def contains_words(wanted: str, label: str) -> bool:
     """`wanted` appears in `label` as whole words: 'Fluent' in '5 - Fluent' → True,
     'Male' in 'Female' → False."""
-    w, l = normalize(wanted), normalize(label)
+    w, l = _bare(wanted), _bare(label)
     return bool(w) and re.search(rf"(?<![a-z0-9]){re.escape(w)}(?![a-z0-9])", l) is not None
