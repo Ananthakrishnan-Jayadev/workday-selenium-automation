@@ -18,6 +18,7 @@ import time
 from typing import Sequence
 
 from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webelement import WebElement
@@ -160,14 +161,26 @@ class Widgets:
             return current
 
         for attempt in (1, 2, 3):
-            if attempt < 3:
+            # Three ways to open it; on Citi a normal click opened nothing (2026-11-10) while a person's
+            # click did, so later attempts imitate a person more closely.
+            if attempt == 1:
                 self.act.click(button, desc=f"{desc} dropdown")
-            else:  # the list wouldn't open on click: try the keyboard
+            elif attempt == 2:   # real mouse: move onto the button, pause, press, release
                 el = self.act.find(button)
                 self.act.scroll_into_view(el)
-                el.send_keys(Keys.ENTER)
-                if self._open_listbox(button) is None:
-                    el.send_keys(Keys.ARROW_DOWN)
+                ActionChains(self.driver).move_to_element(el).pause(0.3).click_and_hold().pause(0.1) \
+                    .release().perform()
+                self.log.debug("%s: opened with a mouse move + press/release", desc)
+            else:                # keyboard: focus the button, then the keys a listbox button opens on
+                el = self.act.find(button)
+                self.act.scroll_into_view(el)
+                self.driver.execute_script("arguments[0].focus();", el)
+                for keys in ((Keys.SPACE,), (Keys.ENTER,), (Keys.ALT, Keys.ARROW_DOWN), (Keys.ARROW_DOWN,)):
+                    ActionChains(self.driver).send_keys(*keys).perform() if len(keys) == 1 else \
+                        ActionChains(self.driver).key_down(keys[0]).send_keys(keys[1]).key_up(keys[0]).perform()
+                    if self._open_listbox(button) is not None:
+                        self.log.debug("%s: opened with the keyboard (%s)", desc, keys)
+                        break
             listbox = self._open_listbox(button)
             if listbox is None:
                 self.log.debug("%s: listbox did not open (attempt %d)", desc, attempt)
