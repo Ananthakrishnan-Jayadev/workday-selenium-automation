@@ -1,5 +1,6 @@
 # Personal data and passwords
 data/
+applications/
 .env
 
 # Run output

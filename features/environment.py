@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.config import load_config  # noqa: E402
+from core.documents import DocumentsError, resolve_documents  # noqa: E402
 from core.driver import create_driver  # noqa: E402
 from core.excel_reader import WorkbookError, load_app_data  # noqa: E402
 from core.excel_writer import update_job_status  # noqa: E402
@@ -79,6 +80,14 @@ def before_all(context):
         context.job = _resolve_job(context)
     except SetupError as exc:
         _fatal(str(exc))
+    # The job's resume / cover letter: checked before the browser opens, so a wrong or missing file
+    # never gets as far as the application.
+    try:
+        docs = resolve_documents(context.data.profile, context.job, context.config.userdata.get("folder", ""))
+    except DocumentsError as exc:
+        _fatal(f"{exc}\n\nJob: {context.job.company} | {context.job.url}")
+    context.job.resume, context.job.cover_letter = docs.resume, docs.cover_letter
+    context.documents = docs
 
 
 def before_scenario(context, scenario):
@@ -88,6 +97,12 @@ def before_scenario(context, scenario):
     log.info("=" * 70)
     log.info("job: %s | %s", context.job.company, context.job.url)
     log.info("run folder: %s", reporter.run_dir)
+    docs = context.documents
+    log.info("application folder: %s", docs.folder)
+    log.info("resume: %s | cover letter: %s", docs.resume.name,
+             docs.cover_letter.name if docs.cover_letter else "none")
+    for w in docs.warnings:
+        log.warning("cover letter: %s", w)
     driver = create_driver(context.cfg.browser)
     context.session = Session.create(driver, context.cfg, reporter)
     context.outcome = {"status": "Failed", "notes": ""}
@@ -122,6 +137,7 @@ def after_scenario(context, scenario):
                 context.outcome["notes"] = f"{failed_steps[0].name}: {msg[-1] if msg else ''}"[:300]
 
     s.reporter.write_result(url=context.job.url, company=context.job.company, row=context.job.row,
+                            resume=str(context.job.resume or ""), cover_letter=str(context.job.cover_letter or ""),
                             **context.outcome)
     if context.job.row and context.outcome.get("status") != "InProgress":
         update_job_status(context.cfg.paths.workbook_path, context.job.row, context.outcome["status"],

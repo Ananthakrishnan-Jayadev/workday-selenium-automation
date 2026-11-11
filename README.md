@@ -1,193 +1,307 @@
 # Workday Auto-Apply (Python · Selenium · behave)
 
-Fills Workday job applications from an Excel workbook, from the job URL through to the
-**Review** page, then stops so you can check the application and submit it yourself.
+Fills in Workday job applications from an Excel workbook, from the job posting URL through to the
+**Review** page, then stops so you can check the application and click **Submit** yourself.
 
-> **Status: V1 complete (2026-11-09).** Live on CIBC end to end: job posting → Apply Manually →
-> sign in → My Information → My Experience → Application Questions → Voluntary Disclosures →
-> **stops on Review**. You submit; the outcome goes back into the Jobs sheet.
-> Not built yet: the batch runner (`run.py`). Run jobs one at a time with `behave -D row=N`.
->
-> **Live-tested (2026-11-09/10) on 11 tenants:** CIBC, BMO, TD, Citi, RBC, Accenture, Manulife,
-> McKesson, Canadian Tire, NVIDIA, Thomson Reuters. Each new company mostly needs new rows in the
-> Questions sheet (its own question wording and option labels); the script pauses and lists them.
+```
+job URL → Apply Manually → sign in → My Information → My Experience → Application Questions
+        → Voluntary Disclosures → Self Identify → REVIEW (stops: you submit) → status written to Excel
+```
 
-## Documents
-| Doc | What's in it |
-|---|---|
-| [docs/PROJECT.md](docs/PROJECT.md) | Goals, scope, non-goals, risks |
-| [docs/DESIGN.md](docs/DESIGN.md) | Architecture, flow, how Workday's controls are handled, Excel schema, config |
-| [docs/PHASES.md](docs/PHASES.md) | The 3 build phases, status and acceptance checks |
-| [docs/PHASE1.md](docs/PHASE1.md) | Detailed Phase 1 plan |
-| [docs/LOCATORS.md](docs/LOCATORS.md) | Every Workday locator, where it was verified, and what's still unverified |
-| [docs/page_dumps/README.md](docs/page_dumps/README.md) | How to capture a Workday page for locator work |
+**Status: V1 (2026-11).** Live-tested to Review on 11 Workday sites: CIBC, BMO, TD, Citi, RBC,
+Accenture, Manulife, McKesson, Canadian Tire, NVIDIA and Thomson Reuters. A new company mostly needs
+new rows in the Questions sheet (its own question wording and option labels). The script pauses on
+anything it can't answer and lists the options, so you can add them.
+
+- **It never clicks Submit.** That is always your decision.
+- It doesn't create accounts, solve CAPTCHAs or get around verification.
+- One job at a time, in a visible browser.
+
+---
+
+## Contents
+1. [Quick start](#quick-start)
+2. [Setup](#setup) (Linux, Windows)
+3. [Your files: one folder per application](#your-files-one-folder-per-application)
+4. [The workbook](#the-workbook)
+5. [How answers are matched](#how-answers-are-matched)
+6. [Running](#running)
+7. [Troubleshooting](#troubleshooting)
+8. [Things Workday does that the code handles](#things-workday-does-that-the-code-handles)
+9. [Project layout and docs](#project-layout-and-docs)
+10. [Next](#next)
+
+---
+
+## Quick start
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python tools/make_template.py            # creates data/applicant_data.xlsx (won't overwrite)
+```
+1. Open **`examples/applicant_data.example.xlsx`**. It is a reference workbook with every sheet and
+   column filled in for a made-up applicant, plus a **Guide** sheet explaining each one.
+2. Fill in **`data/applicant_data.xlsx`** the same way, with your own details. At minimum you need
+   Jobs, Accounts, Profile, WorkExperience and Education.
+3. Put each job's resume (and cover letter) in its own folder:
+   `<ApplicationsFolder>/application_01/` ([details](#your-files-one-folder-per-application)).
+4. Run `behave -D slow_mo_ms=200`, watch it fill the application, fix anything it asks about, and
+   submit on the Review page.
+
+---
 
 ## Setup
+
+### Linux
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate              # each new terminal; Windows: see below
+source .venv/bin/activate              # in each new terminal
 pip install -r requirements.txt
-python tools/make_template.py          # creates data/applicant_data.xlsx (won't overwrite)
+python tools/make_template.py
 ```
-`activate` must be *sourced*, not executed (`.venv/bin/activate` on its own gives "Permission denied").
-Without activating you can call `.venv/bin/behave` directly. Don't use `sudo`.
+- `activate` must be *sourced*, not executed (`.venv/bin/activate` on its own gives "Permission
+  denied"). Without activating, call `.venv/bin/behave` directly. Don't use `sudo`.
+- Tested on Ubuntu with Python 3.14, Selenium 4.52 and behave 1.3.3. Chrome/Chromium or Firefox must
+  be installed.
+- A snap-packaged browser (Ubuntu's default Chromium) uses the snap's own driver automatically.
+  Otherwise Selenium Manager downloads a driver. To override, set `browser.driver_path` /
+  `browser.binary` in `config/config.yaml`.
 
-Tested on Linux (Ubuntu) with Python 3.14, Selenium 4.52, behave 1.3.3. Chrome/Chromium or Firefox must be installed.
-A snap-packaged browser (Ubuntu's default) uses the snap's own driver automatically; otherwise Selenium
-Manager downloads one. Override in `config/config.yaml` → `browser.driver_path` / `browser.binary`.
-
-Passwords can go straight into the Accounts sheet, or into `.env`: copy `.env.example` to `.env`,
-set `CIBC_PASSWORD=...`, and put `ENV:CIBC_PASSWORD` in the Password cell.
-
-### Running on Windows
-Not yet tried on Windows, but nothing in the code is Linux-only. In PowerShell:
+### Windows
+Not tried yet, but nothing in the code is Linux-only. In PowerShell:
 ```powershell
 py -m venv .venv
-.venv\Scripts\Activate.ps1             # each new terminal
+.venv\Scripts\Activate.ps1             # in each new terminal
 pip install -r requirements.txt
 python tools\make_template.py
 behave -D slow_mo_ms=200
 ```
-- If PowerShell won't run `Activate.ps1`, allow local scripts once:
+- If PowerShell won't run `Activate.ps1`, allow local scripts once with
   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. Or skip activating and run
-  `.venv\Scripts\behave -D slow_mo_ms=200`. (In cmd.exe the activate script is `.venv\Scripts\activate.bat`.)
-- Install **Google Chrome** (or Firefox). Selenium Manager downloads the matching driver; the
-  snap-driver handling above only applies on Linux.
-- **File paths in the workbook are per machine.** `ResumePath` and `CoverLetterPath` in the Profile sheet
-  must be Windows paths, e.g. `C:\Users\you\workday-selenium\data\resume.pdf`. The `data\` folder isn't
-  in git: copy the workbook, resume and cover letter over yourself.
-- The console is switched to UTF-8 automatically, so log lines with `→` print correctly. If an old
-  console still shows `?` instead of the arrow, it's cosmetic; `run.log` is always UTF-8.
-- Close the workbook in Excel before a run finishes. Excel locks the file, so the status can't be
-  written back (the run warns and keeps the status in `result.json`).
+  `.venv\Scripts\behave`. In cmd.exe, the activate script is `.venv\Scripts\activate.bat`.
+- Install **Google Chrome** (or Firefox). Selenium Manager downloads the matching driver.
+- Workbook paths are per machine: `ApplicationsFolder` must be a Windows path, e.g.
+  `C:\Users\you\applications`.
+- The console is switched to UTF-8 automatically. `run.log` is always UTF-8.
 
-## The workbook (`data/applicant_data.xlsx`)
-| Sheet | One row per | Notes |
+### Passwords
+Put them in the Accounts sheet, or keep them out of the workbook: copy `.env.example` to `.env`, add
+`CIBC_PASSWORD=...`, and write `ENV:CIBC_PASSWORD` in the Password cell. Passwords are never printed;
+logs show `********`.
+
+---
+
+## Your files: one folder per application
+Each job gets its own folder, so each application can have its own resume and cover letter. The
+**file names are the same in every folder** and are set once in the Profile sheet. Nothing personal
+is in the code.
+
+```
+ApplicationsFolder (Profile)         /home/you/applications
+├─ application_01/                   ← Jobs sheet, Folder column
+│   ├─ resume.pdf                    ← Profile: ResumeFileName
+│   └─ cover_letter.pdf              ← Profile: CoverLetterFileName (optional)
+├─ application_02/
+│   └─ resume.pdf                    (no cover letter: applies without one)
+└─ ...
+```
+
+| JobURL | Folder | Company | Status |
+|---|---|---|---|
+| https://…/job/A | application_01 | CIBC | Pending |
+| https://…/job/B | application_02 | RBC | Pending |
+
+- **Checked before the browser opens.** Any of these stops the run with a message that lists what is
+  actually in the folder:
+  - a blank Folder
+  - a missing folder
+  - a missing resume
+  - a file over 5 MB
+
+  The run never falls back to a different resume.
+- **No cover letter** in the folder: the application goes ahead without one, with a warning in the log.
+- File names match **regardless of upper/lower case**. Workday shows the file's real name.
+- **Same-name files are replaced.** If the application already lists a file with that name (pre-filled
+  from an earlier application), it is deleted and this job's file is uploaded.
+- The Folder cell can also hold a full path. `-D folder=<name>` sets it for a single run.
+- `result.json` records which files were uploaded.
+- **Linux, snap Chromium:** keep `ApplicationsFolder` inside your home directory and outside hidden
+  folders, or the browser can't read the files.
+
+---
+
+## The workbook
+`data/applicant_data.xlsx` (git-ignored). **See `examples/applicant_data.example.xlsx` for every field
+filled in.** Regenerate it with `python tools/make_example.py`.
+
+| Sheet | One row per | What goes in it |
 |---|---|---|
-| Jobs | job URL | `Status = Pending` to include it |
-| Accounts | company | an **existing** Workday account (V1 doesn't create accounts) |
-| Profile | field (key/value) | name, address, phone, How did you hear, LinkedIn, Website, ResumePath, CoverLetterPath (optional) |
-| WorkExperience | job | dates as month name + year; `CurrentlyWorkHere = Yes` hides the end date |
-| Education | school | Degree / FieldOfStudy can list fallbacks |
-| Languages | language | Proficiency applies to every proficiency dropdown |
-| Skills | skill | must be Workday's **exact** skill name (a bracketed note is fine) |
-| Certifications | certificate | only used if the tenant has the section (CIBC doesn't). Not in the company's list → skipped, and the empty entry is deleted so Save isn't blocked |
-| Questions | rule | keywords in the question → answer (see below), incl. the terms checkbox |
+| **Jobs** | job | `JobURL`, `Folder`, `Company` (blank = taken from the URL), `Status`, `LastRun`, `Notes`. `behave` runs the first `Pending` row, else the first `Failed` one. |
+| **Accounts** | company | An **existing** Workday account: `Company`, `TenantHost`, `Email`, `Password` (or `ENV:NAME`). Matched on Company, then on the URL host. |
+| **Profile** | field | Name, address, phone (type, country code, number, extension), HowDidYouHear, PreviouslyWorkedHere, LinkedIn, Website(s), `ApplicationsFolder`, `ResumeFileName`, `CoverLetterFileName` |
+| **WorkExperience** | job held | Title, company, location, `CurrentlyWorkHere` (Yes = no end date), start/end month name + year, description |
+| **Education** | school | School, Degree (+ fallbacks), FieldOfStudy (+ fallbacks), GPA, start/end year |
+| **Languages** | language | `Proficiency` (+ fallbacks) for every proficiency dropdown; `Reading` / `Writing` / `Speaking` / `Overall` override one dropdown |
+| **Skills** | skill | Workday's exact skill name (+ fallbacks). A skill Workday doesn't list is skipped. |
+| **Certifications** | certificate | Name, number, expiry day/month/year (all optional). A certificate the company doesn't list is skipped, and the empty entry is deleted. |
+| **Questions** | rule | Keywords in the question → the answer (+ fallbacks), optionally limited to one company or page. Also covers the terms checkbox. |
 
-**Fallbacks get their own columns** (tried left to right; the first one the company's form offers wins):
-| Sheet | Columns |
+### Fallback columns
+Companies word the same option differently, so most values have fallbacks. They are tried left to
+right, and the first option the form offers wins:
+
+| Sheet | Columns | Example |
+|---|---|---|
+| Profile | `Value`, `Fallback 1`, `Fallback 2` | PhoneType: `Mobile` · `Personal Primary` · `Home Cellular` |
+| Skills | `Skill`, `Fallback 1`, `Fallback 2` | `SQL` · `PostgreSQL` · `MySQL` |
+| Questions | `Answer`, `Fallback 1..3` | `No` · `No, I don't have a disability` · `None` |
+| Education | `Degree` / `FieldOfStudy` + `<Base> Fallback 1..3` | `Master's Degree` · `Masters` |
+| Languages | `Proficiency`, `Proficiency Fallback 1..2` | `Fluent` · `Advanced` |
+
+A `;` inside one cell also separates values, and a later run swaps a fallback for your first choice
+if that becomes available. **When nothing matches, the log lists every option the company offered.**
+Copy the right one into the next fallback column.
+
+### Questions sheet
+`Keywords | Answer | Fallback 1-3 | Company | Page | Notes`
+
+| Keywords | Means |
 |---|---|
-| Profile | `Value`, `Fallback 1`, `Fallback 2` (e.g. PhoneType: `Mobile` · `Personal Primary`) |
-| Skills | `Skill`, `Fallback 1`, `Fallback 2` (e.g. `SQL` · `PostgreSQL` · `MySQL`) |
-| Questions | `Answer`, `Fallback 1`, `Fallback 2`, `Fallback 3` (e.g. `Man` · `Male`) |
-| Education | `Degree`, `Degree Fallback 1..3`, `FieldOfStudy`, `FieldOfStudy Fallback 1..3` |
-| Languages | `Proficiency`, `Proficiency Fallback 1..2` |
+| `authorized to work; eligible to work` | any of these phrases (whole words) |
+| `relative; family member + td` | (relative OR family member) AND td |
+| `worked for {company}` | `{company}` is the job's company: "worked for BMO" on a BMO job |
 
-A later run replaces a fallback with your first choice if that becomes available. (A `;` inside one cell
-still works as a separator, but columns are easier to read.)
+- **Which row wins:** the question's **first clause** (text before `?`, `(`, `.` or `:`) is matched
+  first, and the phrase ending nearest the end of that clause wins. So "What is your gender? …gender
+  identity…" uses the gender row, and "What is your gender identity?" uses the identity row. A row with
+  a **Company** beats a general row.
+- **Page** (`Application`, `Disclosure`, `SelfIdentify`, or blank for any) limits where a row applies.
+- **Answers:**
+  - Dropdowns and radio buttons: the option label.
+  - Text boxes: the answer is typed in.
+  - Dates: `today`, `today+N`, `today+Nw`, `dd/mm/yyyy` or `yyyy-mm-dd`.
+  - Checkbox groups: `Yes` ticks all, or list the labels to tick.
+- **Blank Answer = ask me.** The run pauses on that question and lists its options.
+- **A new wording of a known question:** add its phrase to that row's Keywords, e.g.
+  `employer support to obtain` on the sponsorship row.
 
-**Matching**
-- Case, apostrophes, dashes and slashes are ignored. `Category > Value` picks from nested lists
-  (`Job Board/Social Media > LinkedIn`).
-- **Everything matches whole words**: `No` matches `No (Canada)` but never `Not applicable` or
-  `Do not wish to declare`; `Male` never matches `Female`.
-- List markers in front of options are ignored: `No` matches `b. No, I Don't Have A Disability (Canada)`
-  and `South Asian` matches `i. South Asian (e.g., East Indian…)` (McKesson).
-- Profile / My Experience values match an option that equals them, starts with them
-  (`Canada` → `Canada (+1)`) or contains them as whole words (`Fluent` → `5 - Fluent`).
-- **Question answers are strict**: the option must equal the answer or start with it
-  (`Yes` → `Yes - Newcomer`). `Man` never picks `Trans Man`; add the company's wording as a fallback.
-- **Field of Study** takes the closest option by whole words before a fallback, searching your words in
-  order (`Artificial Intelligence` → `Artificial Intelligence and Robotics`; `Data Analytics` looks for
-  a `Data …` option first). Generic words such as *science* don't count on their own.
-- **Skills** need Workday's exact name. A bracketed note is fine either way: `Python` →
-  `Python (Programming Language)`, `SQL` → `Structured Query Language (SQL)`; the option spelled
-  exactly as in Excel is preferred. `SQL` never picks `SQL Assistant`. A skill Workday doesn't list
-  is skipped.
-- **Different wording per company is normal.** When an answer isn't an option, the log prints every
-  option the company offers: add the one you want as the next fallback (e.g. Race: `South Asian` ·
-  `Asian - South Asian` · `Racialized/ South Asian`; PhoneType: `Mobile` · `Personal Primary` ·
-  `Home Cellular`). To catch a new wording of a known question, add its phrase to that row's Keywords
-  (e.g. `employer support to obtain` on the sponsorship row).
+---
 
-**Questions sheet**: `Keywords | Answer | Fallback 1-3 | Company | Page | Notes`
-- `authorized to work; eligible to work`: any of these phrases. `relative; family member + td`:
-  (relative OR family member) AND td. Phrases match whole words.
-- `{company}` stands for the job's company: `worked for {company}` matches "worked for BMO Financial
-  Group" on a BMO job and "worked for CIBC" on a CIBC job.
-- Which row wins: the question's **first clause** (up to `?`, `(` or `.`) is matched first, and the
-  phrase ending nearest the end of that clause wins. So "What is your gender? … gender identity in the
-  next question" uses the gender row, and "What is your gender identity?" uses the identity row. A row
-  with a Company beats a general row for that company.
-- Blank Answer = ask me: a required question with no answer pauses the run and lists its options.
-  For checkbox groups, `Yes` ticks every box; or list the labels to tick.
+## How answers are matched
+- **Normalised:** case, apostrophes, dashes and slashes are ignored. `Category > Value` picks from
+  nested lists, e.g. `Job Board/Social Media > LinkedIn`.
+- **Whole words only:** `No` matches `No (Canada)` but never `Not applicable` or `Do not wish to
+  declare`, and `Male` never matches `Female`.
+- **List markers are ignored:** `No` matches `b. No, I Don't Have A Disability (Canada)`.
+- **Profile / My Experience values:** an option that equals the value, starts with it
+  (`Canada` → `Canada (+1)`) or contains it (`Fluent` → `5 - Fluent`).
+- **Question answers are strict:** the option must equal the answer or start with it
+  (`Yes` → `Yes - Newcomer`). `Man` never picks `Trans Man`.
+- **Field of Study** takes the closest option by whole words before trying a fallback
+  (`Artificial Intelligence` → `Artificial Intelligence and Robotics`). Generic words such as
+  *science* don't count on their own.
+- **Skills** need Workday's exact name, though a bracketed part is fine either way: `Python` →
+  `Python (Programming Language)`, `SQL` → `Structured Query Language (SQL)`. An exact spelling is
+  preferred, and `SQL` never picks `SQL Assistant`.
 
-The `data/` folder is git-ignored: it contains your password and personal details.
+---
 
-## Run
+## Running
 ```bash
-behave                                   # first Pending job, else the first Failed one (retry)
-behave -D url="https://<company>.wd3.myworkdayjobs.com/.../job/..."
-behave -D row=2                          # a specific Jobs sheet row
-
-behave -D slow_mo_ms=200                 # slow down to watch
+behave -D slow_mo_ms=200                 # the first Pending job (else the first Failed one); slowed down to watch
+behave -D row=5                          # a specific Jobs sheet row
+behave -D url="https://<company>.wd3.myworkdayjobs.com/.../job/..." -D folder=application_07
 behave -D browser=firefox
 behave -D on_unknown=skip                # log problems instead of pausing
 ```
-Run it in a visible browser: headless sign-in didn't complete on CIBC.
+Use a visible browser: headless sign-in didn't complete on CIBC.
 
-Each run writes `reports/<timestamp>_<company>/`: `run.log` (DEBUG detail, every search step),
-a screenshot + HTML at each step and whenever something fails, and `result.json`.
+**When it needs you**, it prints `ACTION NEEDED IN THE BROWSER` with the reason: a field it couldn't
+fill, validation errors after Save and Continue, or required questions it couldn't answer (with their
+options). Fix it in the browser, then press Enter in the terminal.
 
-**When it needs you**, it prints `ACTION NEEDED IN THE BROWSER` with the reason (field it couldn't
-fill, validation errors after Save and Continue, unanswered required questions with their options).
-Fix it in the browser, then press Enter in the terminal.
+**On the Review page the run stops.** Check everything, click Submit yourself if you're happy, then
+type the outcome in the terminal: `s` submitted, `k` skipped, `f` failed, `r` review later. It is
+written to the Jobs sheet (Status, LastRun, Notes) and to `result.json`. A guard refuses any button
+labelled Submit, and any button on the Review page.
 
-**Re-running is safe.** Values already correct are left alone, existing entries are filled in place
-(no duplicates), and a resume or cover letter already listed isn't uploaded twice.
+**Re-running is safe.** Values that are already correct are left alone, existing entries are filled
+in place (no duplicates), and this job's resume replaces a same-named file instead of being added
+twice.
 
-**On the Review page the run stops.** Check the application, click Submit yourself if you're happy,
-then answer in the terminal: `s` submitted, `k` skipped, `f` failed, `r` review later. The answer is
-written to the Jobs sheet (Status, LastRun, Notes) and to the run's `result.json`. The script never
-clicks Submit: a guard refuses any footer button labelled Submit, and any button on the Review page.
+**Output:** `reports/<timestamp>_<company>/` holds `run.log` (full DEBUG detail), a screenshot and the
+page HTML at each step and on every failure, and `result.json`.
+
+---
+
+## Troubleshooting
+| You see | Do this |
+|---|---|
+| `CANNOT START … No application folder for row N` | Fill in that row's Folder cell, or pass `-D folder=` |
+| `CANNOT START … No resume named '…'` | The message lists the folder's files: fix the name in the folder or in `ResumeFileName` |
+| `CANNOT START … ApplicationsFolder is empty / does not exist` | Set it in the Profile sheet (an absolute path) |
+| `CANNOT START … No job to run` | Add a row with Status `Pending`, or use `-D row=` / `-D url=` |
+| Upload fails on Linux with snap Chromium | Move `ApplicationsFolder` under your home directory, outside hidden folders |
+| "No row in the Accounts sheet for company …" | Add the company to Accounts (the account must already exist on that Workday site) |
+| `… not found. Options there: [...]` / `none of [...] found. Available: [...]` | Copy the option you want into the next fallback column |
+| "could not write the Jobs sheet" | Close the workbook in Excel/LibreOffice; the status is still in `result.json` |
+| Something else on a page | Capture it ([docs/page_dumps/README.md](docs/page_dumps/README.md)) and check `run.log` |
+
+---
 
 ## Things Workday does that the code handles
 | Behaviour | Handling |
 |---|---|
-| "Something went wrong. Please refresh the page" right after sign-in | detected, page refreshed (up to twice) |
+| "Something went wrong. Please refresh the page" after sign-in | detected; page refreshed (up to twice) |
+| "Sign in with Apple / Google / email" choice before the form (NVIDIA, Thomson Reuters) | **Sign in with email** is clicked; Apple/Google never |
 | Sign In button covered by an invisible `click_filter` div | the div is clicked |
-| "Sign in with Apple / Google / OR / Sign in with email" chooser before the form (NVIDIA, Thomson Reuters) | **Sign in with email** is clicked; Apple/Google never |
-| Questions render seconds after the page heading (Thomson Reuters) | an empty questions page is waited on (15s) before moving on |
-| An added certification entry left empty makes Save fail ("Certification is required") | the empty entry is deleted |
+| Questions appear seconds after the page heading (Thomson Reuters) | an empty questions page is waited on (15s) |
+| An empty certification entry blocks Save ("Certification is required") | the empty entry is deleted |
 | Options numbered `a.` / `b.` / `i.` (McKesson) | the marker is ignored when matching |
 | Dates: each month/year box is covered by a display div | the display div is clicked, digits typed, value verified |
-| Search lists show "No Items." / the full A-Z list / "No matches found" before the real results | only a list containing a match counts; "No matches" only after ~2.5s |
+| Search lists show "No Items." / an A-Z list / "No matches found" before the real results | only a list containing a match counts; "No matches" only after ~2.5s |
 | Enter with a single match selects it without showing a list | the field is checked first |
+| A dropdown that won't open on click | mouse press, then Space / Enter / Alt+Down / Down |
 | A list left open covers the next field | closed with Escape, else by clicking outside |
 | Selected skills cover the search box | the box is focused directly |
 | Hidden `beecatcher` input (bot trap) | never touched |
 
-## Project layout
+---
+
+## Project layout and docs
 ```
 features/   apply_job.feature, environment.py (hooks), steps/ (common_steps, auth_steps)
 pages/      base_page, job_posting_page, auth_page, my_information_page, my_experience_page,
             questions_page (Application Questions, Voluntary Disclosures, Self Identify)
 locators/   common, job_posting, auth, my_information, my_experience, questions
-core/       actions (robust click/type/focus), widgets (dropdown, prompt, date, upload, checkbox,
-            auto-detect), text (matching), answers (Questions rules), excel_reader, models,
-            session (pause-for-human), reporter, waits, driver, config, logger
-tools/      make_template.py, dump_page.py
-docs/       project docs + page_dumps/ (captured HTML is git-ignored)
-data/       applicant_data.xlsx, resume (git-ignored)
+core/       actions (click/type/focus), widgets (dropdown, prompt, date, upload, checkbox, auto-detect),
+            text (matching), answers (Questions rules), documents (per-job resume / cover letter),
+            excel_reader / excel_writer, models, session (pause for you), reporter, waits, driver,
+            config, logger
+tools/      make_template.py (empty workbook), make_example.py (filled reference), dump_page.py
+examples/   applicant_data.example.xlsx (fictional, every field filled)
+config/     config.yaml (browser, timeouts, behaviour; any value can be overridden with -D)
+docs/       design docs + page_dumps/ (captured HTML is git-ignored)
+data/       your workbook (git-ignored)
 reports/    run output (git-ignored)
 ```
 
-## Next (V2 ideas)
-- `run.py` batch runner: every Pending row, one browser per job, status written back.
-- Account creation + email verification, "Use My Last Application", headless runs.
-- More tenants: capture their pages (`tools/dump_page.py`) and extend `docs/LOCATORS.md`.
+| Doc | What's in it |
+|---|---|
+| [docs/PROJECT.md](docs/PROJECT.md) | Goals, scope, non-goals, risks |
+| [docs/DESIGN.md](docs/DESIGN.md) | Architecture, flow, how Workday's controls are handled, Excel schema, config |
+| [docs/PHASES.md](docs/PHASES.md) | Build phases, status and acceptance checks |
+| [docs/PHASE1.md](docs/PHASE1.md) | Detailed Phase 1 plan |
+| [docs/LOCATORS.md](docs/LOCATORS.md) | Every Workday locator, where it was verified, what's still unverified |
+| [docs/page_dumps/README.md](docs/page_dumps/README.md) | How to capture a Workday page (DevTools console snippets) |
 
-## Safety
-- The script **never clicks Submit**.
-- It doesn't create accounts, solve CAPTCHAs or bypass verification.
-- One job at a time, in a visible browser.
+Git-ignored because they hold personal data: `data/`, `applications/`, `.env`, `reports/` and
+`docs/page_dumps/*.html`.
+
+---
+
+## Next
+- `run.py` batch runner: every Pending row, one browser per job, status written back.
+- Headless runs that still let you review: fill headless, then review in a visible browser or through
+  Chrome's remote debugging.
+- Account creation and email verification, and the "Use My Last Application" path.

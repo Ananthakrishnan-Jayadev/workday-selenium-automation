@@ -21,10 +21,10 @@ NOTE_FONT = Font(italic=True, color="666666")
 
 SHEETS: dict[str, dict] = {
     "Jobs": {
-        "headers": ["JobURL", "Company", "Status", "LastRun", "Notes"],
-        "widths": [90, 14, 16, 20, 40],
+        "headers": ["JobURL", "Folder", "Company", "Status", "LastRun", "Notes"],
+        "widths": [90, 18, 14, 16, 20, 40],
         "rows": [["https://cibc.wd3.myworkdayjobs.com/search/job/Toronto-ON/Senior-Data-Engineer_2622337",
-                  "CIBC", "Pending", "", ""]],
+                  "application_01", "CIBC", "Pending", "", ""]],
     },
     "Accounts": {
         "headers": ["Company", "TenantHost", "Email", "Password"],
@@ -53,8 +53,11 @@ SHEETS: dict[str, dict] = {
             ["PreviouslyWorkedHere", "No", "", "", "Yes / No"],
             ["LinkedIn", "https://www.linkedin.com/in/your-profile/", "", "", ""],
             ["Website", "https://your-portfolio.example", "", "", "All URLs are added (Value, Fallback 1, ...)"],
-            ["ResumePath", "/home/you/Documents/resume.pdf", "", "", "Absolute path to your resume (5MB max)"],
-            ["CoverLetterPath", "", "", "", "Optional: absolute path to your cover letter (5MB max)"],
+            ["ApplicationsFolder", "/home/you/applications", "", "",
+             "Holds one sub-folder per job (named in the Jobs sheet's Folder column)"],
+            ["ResumeFileName", "resume.pdf", "", "", "The resume's file name inside every application folder (5MB max)"],
+            ["CoverLetterFileName", "cover_letter.pdf", "", "",
+             "Optional: the cover letter's file name; a folder without it uploads no cover letter"],
         ],
     },
     # ---- Phase 2 -------------------------------------------------------------------------
@@ -105,10 +108,25 @@ SHEETS: dict[str, dict] = {
 STATUS_VALUES = '"Pending,ReadyForReview,Submitted,Skipped,Failed"'
 
 
-def build(path: Path) -> None:
+def build(path: Path, sheets: dict[str, dict] | None = None, guide: list[tuple[str, str]] | None = None) -> None:
+    """Write the workbook. `sheets` defaults to SHEETS (the template); tools/make_example.py passes a
+    fully filled copy. `guide` adds a first sheet of (topic, explanation) rows."""
+    sheets = SHEETS if sheets is None else sheets
     wb = Workbook()
     wb.remove(wb.active)
-    for name, spec in SHEETS.items():
+    if guide:
+        ws = wb.create_sheet("Guide")
+        ws.append(["Topic", "Explanation"])
+        for row in guide:
+            ws.append(list(row))
+        ws.column_dimensions["A"].width, ws.column_dimensions["B"].width = 26, 140
+        for cell in ws[1]:
+            cell.font, cell.fill = Font(bold=True), HEADER_FILL
+        for row in ws.iter_rows(min_row=2):
+            row[0].font = Font(bold=True)
+            row[1].alignment = Alignment(wrap_text=True, vertical="top")
+        ws.freeze_panes = "A2"
+    for name, spec in sheets.items():
         ws = wb.create_sheet(name)
         ws.append(spec["headers"])
         for row in spec["rows"]:
@@ -120,13 +138,14 @@ def build(path: Path) -> None:
             cell.fill = HEADER_FILL
             cell.alignment = Alignment(vertical="center")
         ws.freeze_panes = "A2"
-        if name == "Profile":
-            for (notes,) in ws.iter_rows(min_row=2, min_col=3, max_col=3):
+        if "Notes" in spec["headers"]:  # notes in grey italics, so they read as comments
+            col = spec["headers"].index("Notes") + 1
+            for (notes,) in ws.iter_rows(min_row=2, min_col=col, max_col=col):
                 notes.font = NOTE_FONT
         if name == "Jobs":
             dv = DataValidation(type="list", formula1=STATUS_VALUES, allow_blank=True)
             ws.add_data_validation(dv)
-            dv.add("C2:C1000")
+            dv.add("D2:D1000")  # Status
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
 

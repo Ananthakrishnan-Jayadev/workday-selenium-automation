@@ -96,7 +96,8 @@ def load_app_data(path: Path) -> AppData:
                 if url:
                     # Company left blank → take it from the URL (https://cibc.wd3... → CIBC)
                     data.jobs.append(Job(url=url, company=_get(r, "Company") or company_from_url(url),
-                                         status=_get(r, "Status") or "Pending", row=row, notes=_get(r, "Notes")))
+                                         status=_get(r, "Status") or "Pending", row=row, notes=_get(r, "Notes"),
+                                         folder=_get(r, "Folder", "ApplicationFolder")))
 
         if "accounts" in sheets:
             for row, r in _rows(sheets["accounts"]):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import urlparse
 
 from core.text import normalize, split_list
@@ -14,6 +15,9 @@ class Job:
     status: str = "Pending"
     row: int | None = None  # worksheet row number (for writing status back)
     notes: str = ""
+    folder: str = ""                    # Jobs sheet "Folder": this job's sub-folder of ApplicationsFolder
+    resume: Path | None = None          # resolved at start-up (core/documents.py)
+    cover_letter: Path | None = None
 
     @property
     def host(self) -> str:

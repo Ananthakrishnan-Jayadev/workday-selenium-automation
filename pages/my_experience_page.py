@@ -142,15 +142,17 @@ class MyExperiencePage(BasePage):
         self._do(r, label, value, lambda: self.w.fill_auto(css, value, desc=label, multi=multi, loose=loose))
 
     # ================================================================== sections
-    def fill_documents(self, r: FillReport, resume: str, cover_letter: str) -> None:
-        """Resume, then cover letter. The cover letter goes into the tenant's Cover Letter section if it
-        has one, otherwise into the Resume/CV upload (which accepts several files on CIBC). Each upload
-        uses the file input inside its own section; a file already listed there isn't uploaded again."""
-        docs = [("Resume", "ResumePath", resume, "resume"), ("Cover letter", "CoverLetterPath", cover_letter, None)]
-        for label, key, path, kind in docs:
+    def fill_documents(self, r: FillReport, resume, cover_letter) -> None:
+        """Resume, then cover letter, from the job's application folder (core/documents.py). The cover
+        letter goes into the tenant's Cover Letter section if it has one, otherwise into the Resume/CV
+        upload (which accepts several files on CIBC). A listed file with the same name is replaced:
+        it may be the resume from an earlier application."""
+        docs = [("Resume", resume, "resume"), ("Cover letter", cover_letter, None)]
+        for label, path, kind in docs:
             if not path:
-                r.skipped.append(f"{label} (no {key} in Profile)")
+                r.skipped.append(f"{label} (none in this job's application folder)")
                 continue
+            path = str(path)
             if kind is None:  # cover letter: own section if present, else the resume section
                 own = L.section(L.SECTION_HEADINGS["cover_letter"])
                 kind = "cover_letter" if waits.is_visible(self.driver, own) else "resume"
@@ -323,7 +325,7 @@ class MyExperiencePage(BasePage):
         p = data.profile
         r = FillReport(page=self.NAME)
 
-        self.fill_documents(r, p.get("ResumePath"), p.get("CoverLetterPath"))
+        self.fill_documents(r, getattr(job, "resume", None), getattr(job, "cover_letter", None))
         self.fill_work(r, data.work)
         self.fill_education(r, data.education)
         self.fill_certifications(r, data)

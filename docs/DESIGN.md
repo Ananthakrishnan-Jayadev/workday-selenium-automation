@@ -228,9 +228,17 @@ on; `fail` (or no terminal) raises.
 separated by `;` and act as fallbacks tried in order.
 
 ### `Jobs`
-| JobURL | Company | Status | LastRun | Notes |
-|---|---|---|---|---|
-| https://cibc.wd3.myworkdayjobs.com/... | CIBC | Pending | | |
+| JobURL | Folder | Company | Status | LastRun | Notes |
+|---|---|---|---|---|---|
+| https://cibc.wd3.myworkdayjobs.com/... | application_01 | CIBC | Pending | | |
+
+`Folder` names the job's sub-folder of `ApplicationsFolder` (Profile); an absolute path also works.
+`core/documents.resolve_documents` finds `<ApplicationsFolder>/<Folder>/<ResumeFileName>` and
+`.../<CoverLetterFileName>` in `before_all` (case-insensitive names, 5 MB limit). Missing folder or
+resume → CANNOT START with the folder listing; missing cover letter → warning, uploaded without.
+The paths are stored on the `Job` (`job.resume`, `job.cover_letter`) and written to `result.json`.
+On My Experience, a listed file with the same name is deleted (`button[data-automation-id="delete-file"]`,
+`aria-label="Delete <name>"`) before uploading, because every job's resume has the same name.
 
 Status values: `Pending`, `ReadyForReview`, `Submitted`, `Skipped`, `Failed`. Batch mode runs `Pending` only.
 
@@ -251,7 +259,9 @@ found, the job is marked `Failed: no account` (V1 does not create accounts).
 | HowDidYouHear | `LinkedIn` · `Social Network: Linkedin` · `Job Board/Social Media > LinkedIn` · `Social Media` |
 | PreviouslyWorkedHere | `No` |
 | LinkedIn, Website | |
-| ResumePath | `/home/.../resume.pdf` |
+| ApplicationsFolder | `/home/you/applications` (relative = inside the project) |
+| ResumeFileName | `resume.pdf` |
+| CoverLetterFileName | `cover_letter.pdf` (optional) |
 
 ### `WorkExperience`
 | JobTitle | Company | Location | CurrentlyWorkHere | StartMonth | StartYear | EndMonth | EndYear | Description |

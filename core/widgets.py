@@ -672,8 +672,12 @@ class Widgets:
         return True
 
     # ============================================================== file upload
-    def upload_file(self, input_: Locator, path: str, container: Locator, desc: str) -> bool:
-        """Send a file to a (usually hidden) <input type=file> and wait for its name to show up."""
+    def upload_file(self, input_: Locator, path: str, container: Locator, desc: str, replace: bool = True) -> bool:
+        """Send a file to a (usually hidden) <input type=file> and wait for its name to show up.
+
+        Every job's resume has the same file name, so a file of that name already listed may be an
+        OLD one (pre-filled from an earlier application). replace=True deletes it first, so the file
+        attached is always this job's."""
         from pathlib import Path as _P
         file = _P(path).expanduser()
         if not file.is_file():
@@ -681,14 +685,41 @@ class Widgets:
             return False
         # Match the full file name only: the stem alone ("resume") can appear in the section heading.
         if file.name.lower() in self._text_of(container).lower():
-            self.log.info("%s: %s already uploaded", desc, file.name)
-            return True
+            if not replace:
+                self.log.info("%s: %s already uploaded", desc, file.name)
+                return True
+            if not self._delete_uploaded(container, file.name, desc):
+                self.log.warning("%s: %s is listed but could not be removed; not uploading it again",
+                                 desc, file.name)
+                return False
         el = self.act.find(input_)
         el.send_keys(str(file.resolve()))
         shown = waits.poll(lambda: file.name.lower() in self._text_of(container).lower(), self.cfg.timeouts.page_change)
         (self.log.info if shown else self.log.warning)("%s: %s %s", desc, file.name,
                                                         "uploaded" if shown else "did not appear after upload")
         return bool(shown)
+
+    def _delete_uploaded(self, container: Locator, name: str, desc: str) -> bool:
+        """Click the trash button of every listed file called `name` (button[data-automation-id=
+        "delete-file"][aria-label="Delete <name>"]) and wait until the name is gone."""
+        js = """
+        const [box, name] = arguments;
+        return [...box.querySelectorAll('button[data-automation-id="delete-file"], button[aria-label^="Delete "]')]
+            .filter(b => (b.getAttribute('aria-label') || '').trim().toLowerCase() === ('delete ' + name).toLowerCase());
+        """
+        for _ in range(5):
+            try:
+                buttons = self.driver.execute_script(js, self.driver.find_element(*container), name)
+            except WebDriverException:
+                buttons = []
+            if not buttons:
+                break
+            self.act.click(buttons[0], desc=f"{desc}: delete the listed {name}")
+            self.act.settle(0.5)
+        gone = waits.poll(lambda: name.lower() not in self._text_of(container).lower(), self.cfg.timeouts.default)
+        if gone:
+            self.log.info("%s: removed the %s already listed (replacing it with this job's file)", desc, name)
+        return bool(gone)
 
     def _text_of(self, locator: Locator) -> str:
         try:
