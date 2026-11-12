@@ -68,7 +68,7 @@ python tools/make_template.py
   `browser.binary` in `config/config.yaml`.
 
 ### Windows
-Not tried yet, but nothing in the code is Linux-only. In PowerShell:
+In PowerShell:
 ```powershell
 py -m venv .venv
 .venv\Scripts\Activate.ps1             # in each new terminal
